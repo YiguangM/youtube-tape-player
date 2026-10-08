@@ -1,0 +1,48 @@
+# Tape Deck
+
+A YouTube player dressed up as a retro cassette deck. Paste a YouTube link to record a tape, pop it in, and press play.
+
+- **Videos and playlists:** a playlist link records a *mixtape* that plays the whole playlist. Skip songs with the TRK buttons or Shift+N / Shift+P. (YouTube Mixes can't be played outside YouTube.)
+- **Mini player:** the **MINI PLAYER** button shrinks the app window into a compact player in the bottom-right corner of the screen, with Prev, Play/Stop, Next, speed and volume. The expand button (or Esc) puts it back. This needs the app window opened from the desktop icon, because browser tabs can't resize themselves.
+- **Volume knob:** hover over it and scroll the mouse wheel. You can also drag it up or down, or use the arrow keys when it's focused.
+- **Speed:** play at 0.5x, 1x, 1.5x or 2x from the deck or the mini player (or Shift+&lt; / Shift+&gt;). The speed is remembered.
+
+## Open it with one click (Windows)
+
+Run this once to add a **Tape Deck** icon to your Desktop and Start menu:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File launcher\install-shortcut.ps1
+```
+
+Clicking the icon starts the app and opens it in its own window. Closing the window stops it again. The first launch, and the first launch after any code change, takes a little longer while the app is prepared.
+
+If you move the project folder, run the command again to update the shortcuts. To pin Tape Deck to the taskbar, right-click it in the Start menu and choose **Pin to taskbar**.
+
+## Install it from the browser
+
+The app includes a web app manifest. In Chrome or Edge, use the install button in the address bar (or **⋮ → Cast, save and share → Install page as app**) to add it with its own icon. Once the app is deployed to a public URL, anyone can install it this way.
+
+## Develop
+
+```bash
+npm install
+npm run dev
+```
+
+Then open [http://localhost:3000](http://localhost:3000).
+
+| Command         | What it does                         |
+| --------------- | ------------------------------------ |
+| `npm run dev`   | Development server with live reload  |
+| `npm run build` | Production build                     |
+| `npm start`     | Serve the production build           |
+| `npm run lint`  | Lint the code                        |
+
+### Where things live
+
+- `src/components/TapeDeck.tsx`: the deck, its controls, and the tape rack
+- `src/components/Cassette.tsx`: the cassette drawing and spinning reels
+- `src/app/api/tape/route.ts`: looks up a video's title and checks it can be embedded
+- `src/app/manifest.ts`, `src/app/icon.svg`, `public/icons/`: app name and icons
+- `launcher/`: the Windows launcher and shortcut installer
