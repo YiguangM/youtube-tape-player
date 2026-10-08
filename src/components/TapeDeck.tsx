@@ -9,6 +9,7 @@ import {
   type FormEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
+import { createPortal } from "react-dom";
 import { Cassette, tapeColors } from "./Cassette";
 import { ICONS, Key, SPEEDS, SpeedSelector } from "./controls";
 import { MiniPlayer } from "./MiniPlayer";
@@ -18,9 +19,11 @@ import {
   cornerBounds,
   currentBounds,
   fullBounds,
+  MINI_CONTENT,
   needsRecentring,
   type WindowBounds,
 } from "@/lib/appWindow";
+import { openFloatingWindow, useFloatingWindowSupported } from "@/lib/pip";
 import { createStoredValue } from "@/lib/stored";
 import { keyClick } from "@/lib/sfx";
 import { PlayerState, formatTime, loadYouTubeApi, parseYouTubeLink, type YTPlayer } from "@/lib/youtube";
@@ -135,6 +138,9 @@ export function TapeDeck() {
   // Mini mode shrinks the whole window into a compact player in the screen corner.
   const [mini, setMini] = useState(false);
   const restoreBounds = useRef<WindowBounds | null>(null);
+  // The floating player: a separate always-on-top window (Chrome and Edge only).
+  const floatingSupported = useFloatingWindowSupported();
+  const [floatWindow, setFloatWindow] = useState<Window | null>(null);
 
   const screenRef = useRef<HTMLDivElement>(null);
   const playerRef = useRef<YTPlayer | null>(null);
@@ -492,6 +498,29 @@ export function TapeDeck() {
     void applyBounds(() => saved);
   }
 
+  async function toggleFloating() {
+    keyClick();
+    if (floatWindow) {
+      floatWindow.close();
+      return;
+    }
+    try {
+      const floating = await openFloatingWindow(MINI_CONTENT.width, MINI_CONTENT.height);
+      if (!floating) return;
+      floating.document.body.className = "floating-body";
+      floating.addEventListener("pagehide", () => setFloatWindow(null), { once: true });
+      setFloatWindow(floating);
+    } catch {
+      setDeckMessage("Couldn't open the floating player in this browser.");
+    }
+  }
+
+  function closeFloating() {
+    keyClick();
+    floatWindow?.close();
+    window.focus();
+  }
+
   function seek(seconds: number) {
     playerRef.current?.seekTo(seconds, true);
     setTime(seconds);
@@ -513,8 +542,9 @@ export function TapeDeck() {
   // Shift+< / Shift+> change speed. Ignored while typing or on a focused control.
   const onKeyDown = useEffectEvent((event: KeyboardEvent) => {
     if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
-    if (event.key === "Escape" && mini) {
-      exitMini();
+    if (event.key === "Escape") {
+      if (floatWindow && event.view === floatWindow) closeFloating();
+      else if (mini) exitMini();
       return;
     }
     const target = event.target as HTMLElement | null;
@@ -553,6 +583,17 @@ export function TapeDeck() {
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, []);
+
+  // The shortcuts work in the floating player too, and it closes along with the deck.
+  useEffect(() => {
+    if (!floatWindow) return;
+    const handler = (event: KeyboardEvent) => onKeyDown(event);
+    floatWindow.addEventListener("keydown", handler);
+    return () => {
+      floatWindow.removeEventListener("keydown", handler);
+      floatWindow.close();
+    };
+  }, [floatWindow]);
 
   // After a reload in mini mode, or a relaunch where the window was last closed in
   // the corner, bring the full deck back to normal size in the middle of the screen.
@@ -650,6 +691,35 @@ export function TapeDeck() {
     if (playing && speed !== 1) statusText += ` ${speed}x`;
   }
 
+  // Shared by the corner mini player and the floating window.
+  const miniPlayerProps = {
+    tape,
+    title: track?.title || tape?.title || "No tape in the deck",
+    subtitle: !tape
+      ? "Pick a tape in the rack"
+      : track
+        ? `Track ${track.index + 1} of ${track.count} · ${tape.title}`
+        : tape.author || statusText,
+    note: cassetteNote,
+    time,
+    duration,
+    progress,
+    reelProgress,
+    motion,
+    playing,
+    ready: playerReady,
+    canPrevious: playerReady,
+    canNext: playerReady && ((!!track && track.index < track.count - 1) || !!rackNeighbour(1)),
+    onPrevious: skipBack,
+    onPlayStop: playing ? stop : play,
+    onNext: skipForward,
+    speed,
+    isSpeedAvailable,
+    onSpeedChange: changeSpeed,
+    volume,
+    onVolumeChange: setVolume,
+  };
+
   let displayLine = "Paste a YouTube link below to record a tape";
   if (deckMessage) displayLine = deckMessage;
   else if (track) displayLine = `${pad2(track.index + 1)}/${pad2(track.count)}  ${track.title || tape?.title || ""}`;
@@ -672,7 +742,7 @@ export function TapeDeck() {
           <div className="deck-plate">
             <span className="deck-brand">TAPE DECK</span>
             <span className="deck-model">YT-85 · STEREO CASSETTE</span>
-            <div className="ml-auto flex items-center gap-4">
+            <div className="ml-auto flex flex-wrap items-center justify-end gap-x-3 gap-y-2 sm:gap-x-4">
               <button
                 type="button"
                 className="plate-btn"
@@ -680,10 +750,24 @@ export function TapeDeck() {
                 onClick={enterMini}
               >
                 <span className="h-3.5 w-3.5" aria-hidden>
-                  {ICONS.miniPlayer}
+                  {ICONS.corner}
                 </span>
                 MINI PLAYER
               </button>
+              {floatingSupported && (
+                <button
+                  type="button"
+                  className="plate-btn"
+                  aria-pressed={floatWindow !== null}
+                  title="Open a small player that floats on top of your other windows"
+                  onClick={() => void toggleFloating()}
+                >
+                  <span className="h-3.5 w-3.5" aria-hidden>
+                    {ICONS.miniPlayer}
+                  </span>
+                  FLOATING
+                </button>
+              )}
               <span className="flex items-center gap-2 text-[10px] font-semibold tracking-[0.2em]">
                 <span className={`led ${playing ? "led-on" : ""}`} aria-hidden />
                 PLAY
@@ -976,38 +1060,15 @@ export function TapeDeck() {
 
       {mini && (
         <div className="mini-layer">
-          <MiniPlayer
-            tape={tape}
-            title={track?.title || tape?.title || "No tape in the deck"}
-            subtitle={
-              !tape
-                ? "Pick a tape in the rack"
-                : track
-                  ? `Track ${track.index + 1} of ${track.count} · ${tape.title}`
-                  : tape.author || statusText
-            }
-            note={cassetteNote}
-            time={time}
-            duration={duration}
-            progress={progress}
-            reelProgress={reelProgress}
-            motion={motion}
-            playing={playing}
-            ready={playerReady}
-            canPrevious={playerReady}
-            canNext={playerReady && ((!!track && track.index < track.count - 1) || !!rackNeighbour(1))}
-            onPrevious={skipBack}
-            onPlayStop={playing ? stop : play}
-            onNext={skipForward}
-            speed={speed}
-            isSpeedAvailable={isSpeedAvailable}
-            onSpeedChange={changeSpeed}
-            volume={volume}
-            onVolumeChange={setVolume}
-            onExpand={exitMini}
-          />
+          <MiniPlayer {...miniPlayerProps} onExpand={exitMini} />
         </div>
       )}
+
+      {floatWindow &&
+        createPortal(
+          <MiniPlayer {...miniPlayerProps} onExpand={closeFloating} expandLabel="Back to the deck" />,
+          floatWindow.document.body,
+        )}
     </div>
   );
 }

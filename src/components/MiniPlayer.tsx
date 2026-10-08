@@ -30,9 +30,14 @@ type MiniPlayerProps = {
   volume: number;
   onVolumeChange: (volume: number) => void;
   onExpand: () => void;
+  /** What the expand button does, e.g. "Back to full size" or "Back to the deck" */
+  expandLabel?: string;
 };
 
-/** The compact player shown when the window is shrunk into the screen corner. */
+/**
+ * The compact player, shown when the window is shrunk into the screen corner
+ * and in the floating always-on-top window.
+ */
 export function MiniPlayer(props: MiniPlayerProps) {
   const { tape, title, subtitle, note, time, duration, progress, reelProgress, motion, playing, ready } = props;
 
@@ -43,8 +48,8 @@ export function MiniPlayer(props: MiniPlayerProps) {
         <button
           type="button"
           className="mini-expand"
-          aria-label="Back to full size"
-          title="Back to full size (Esc)"
+          aria-label={props.expandLabel ?? "Back to full size"}
+          title={`${props.expandLabel ?? "Back to full size"} (Esc)`}
           onClick={props.onExpand}
         >
           <span className="h-4 w-4" aria-hidden>

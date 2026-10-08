@@ -12,6 +12,7 @@
 
 - **Videos and playlists:** a playlist link records a *mixtape* that plays the whole playlist. Skip songs with the TRK buttons or Shift+N / Shift+P. (YouTube Mixes can't be played outside YouTube.)
 - **Mini player:** the **MINI PLAYER** button shrinks the app window into a compact player in the bottom-right corner of the screen, with Prev, Play/Stop, Next, speed and volume. The expand button (or Esc) puts it back. This needs the app window opened from the desktop icon, because browser tabs can't resize themselves.
+- **Floating player:** the **FLOATING** button opens the same compact player in a separate small window that stays on top of all your other windows. Close it with its ⤢ button or Esc. This needs Chrome or Edge.
 - **Volume knob:** hover over it and scroll the mouse wheel. You can also drag it up or down, or use the arrow keys when it's focused.
 - **Speed:** play at 0.5x, 1x, 1.5x or 2x from the deck or the mini player (or Shift+&lt; / Shift+&gt;). The speed is remembered.
 - **Deck controls:** hold REW / FF to wind through a video (a quick tap skips 10 seconds). The reels spin as the tape plays.

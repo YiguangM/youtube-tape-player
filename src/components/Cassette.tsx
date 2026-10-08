@@ -58,7 +58,10 @@ export function Cassette({ id, title, author, progress, motion, note = "TYPE I Â
   // constant speed, so the fuller reel turns slower than the emptier one.
   useEffect(() => {
     if (motion === 0) return;
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    // Animate with the window this cassette is drawn in: the floating player keeps
+    // spinning even while the main window is hidden and its frames are paused.
+    const view = leftReel.current?.ownerDocument.defaultView ?? window;
+    if (view.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
 
     let frame = 0;
     let last = performance.now();
@@ -71,10 +74,10 @@ export function Cassette({ id, title, author, progress, motion, note = "TYPE I Â
       angles.current.right += toDegrees(packRadius(p));
       leftReel.current?.setAttribute("transform", `rotate(${angles.current.left} ${LEFT.x} ${LEFT.y})`);
       rightReel.current?.setAttribute("transform", `rotate(${angles.current.right} ${RIGHT.x} ${RIGHT.y})`);
-      frame = requestAnimationFrame(tick);
+      frame = view.requestAnimationFrame(tick);
     };
-    frame = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(frame);
+    frame = view.requestAnimationFrame(tick);
+    return () => view.cancelAnimationFrame(frame);
   }, [motion]);
 
   return (

@@ -99,6 +99,12 @@ export const ICONS = {
       <path d="M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7" />
     </svg>
   ),
+  corner: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <path d="M8 9l7 7M16 11v5h-5" />
+    </svg>
+  ),
   miniPlayer: (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round">
       <rect x="3" y="5" width="18" height="14" rx="2" />

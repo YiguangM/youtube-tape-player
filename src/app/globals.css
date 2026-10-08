@@ -77,6 +77,13 @@ html:has([data-mini]) {
   visibility: visible;
 }
 
+/* The floating (always-on-top) player window is always dark, like the deck. */
+body.floating-body {
+  margin: 0;
+  background: linear-gradient(180deg, #2b2b30 0%, #151518 100%);
+  color: #d9d4ca;
+}
+
 .mini-layer {
   position: fixed;
   inset: 0;
@@ -143,6 +150,7 @@ html:has([data-mini]) {
     font-size: 10px;
     font-weight: 700;
     letter-spacing: 0.18em;
+    white-space: nowrap;
     cursor: pointer;
   }
 
