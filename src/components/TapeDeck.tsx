@@ -6,13 +6,13 @@ import {
   useRef,
   useState,
   type CSSProperties,
-  type FormEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import { createPortal } from "react-dom";
-import { Cassette, tapeColors } from "./Cassette";
+import { Cassette } from "./Cassette";
 import { ICONS, Key, SPEEDS, SpeedSelector } from "./controls";
 import { MiniPlayer } from "./MiniPlayer";
+import { TapeRack } from "./TapeRack";
 import { VolumeKnob } from "./VolumeKnob";
 import {
   applyBounds,
@@ -24,48 +24,24 @@ import {
   type WindowBounds,
 } from "@/lib/appWindow";
 import { openFloatingWindow, useFloatingWindowSupported } from "@/lib/pip";
-import { createStoredValue } from "@/lib/stored";
+import {
+  resumePoint,
+  tapeKey,
+  useRack,
+  withoutTape,
+  withResume,
+  withTape,
+  type Tape,
+} from "@/lib/rackStore";
+import { useAutoNext, useSpeed, useVolume } from "@/lib/settings";
 import { keyClick } from "@/lib/sfx";
-import { PlayerState, formatTime, loadYouTubeApi, parseYouTubeLink, type YTPlayer } from "@/lib/youtube";
+import { PlayerState, formatTime, loadYouTubeApi, type YTPlayer } from "@/lib/youtube";
 
-/** A single video, or a whole playlist ("mixtape") when kind is "playlist". */
-type Tape = { kind?: "playlist"; id: string; title: string; author: string };
-type TapeKind = "video" | "playlist";
 type Status = "empty" | "loading" | "cued" | "playing" | "buffering" | "paused" | "ended" | "jammed";
-type Slot = { tape: Tape; autoplay: boolean; insertedAt: number };
+/** The tape in the deck, and where to start it. */
+type Slot = { tape: Tape; autoplay: boolean; insertedAt: number; start: { seconds: number; track: number } };
 type Wind = { dir: 1 | -1; from: number; startedAt: number };
 type Track = { index: number; count: number; title: string };
-
-const kindOf = (tape: Tape): TapeKind => tape.kind ?? "video";
-const tapeKey = (tape: Tape) => `${kindOf(tape)}:${tape.id}`;
-
-const isTapeList = (value: unknown): value is Tape[] =>
-  Array.isArray(value) &&
-  value.every(
-    (t) =>
-      t &&
-      (t.kind === undefined || t.kind === "playlist") &&
-      typeof t.id === "string" &&
-      typeof t.title === "string" &&
-      typeof t.author === "string",
-  );
-
-const useTapes = createStoredValue<Tape[]>("tapedeck:tapes", [], isTapeList);
-const useVolume = createStoredValue<number>(
-  "tapedeck:volume",
-  80,
-  (v): v is number => typeof v === "number" && v >= 0 && v <= 100,
-);
-const useSpeed = createStoredValue<number>(
-  "tapedeck:speed",
-  1,
-  (v): v is number => typeof v === "number" && v >= 0.25 && v <= 2,
-);
-const useAutoNext = createStoredValue<boolean>(
-  "tapedeck:auto-next",
-  true,
-  (v): v is boolean => typeof v === "boolean",
-);
 
 const PLAYER_ERRORS: Record<number, string> = {
   2: "That video ID isn't valid.",
@@ -79,6 +55,7 @@ const NUDGE_SECONDS = 10;
 const TAP_MS = 250; // a press shorter than this skips instead of winding
 const RESTART_TRACK_AFTER = 3; // PREV restarts the current track if it's this far in
 const RATE_ECHO_MS = 3000; // how long YouTube may take to report back a speed we set
+const RESUME_SAVE_MS = 5000; // how often the playing position is saved
 
 /** Keep seeks inside the tape, stopping just short of the end like a real deck. */
 function clampToTape(seconds: number, total: number) {
@@ -86,15 +63,15 @@ function clampToTape(seconds: number, total: number) {
 }
 
 function loadIntoPlayer(player: YTPlayer, slot: Slot) {
-  const { tape, autoplay } = slot;
-  if (kindOf(tape) === "playlist") {
-    const request = { list: tape.id, listType: "playlist" as const, index: 0 };
+  const { tape, autoplay, start } = slot;
+  if (tape.kind === "playlist") {
+    const request = { list: tape.id, listType: "playlist" as const, index: start.track, startSeconds: start.seconds };
     if (autoplay) player.loadPlaylist(request);
     else player.cuePlaylist(request);
-  } else if (autoplay) {
-    player.loadVideoById(tape.id);
   } else {
-    player.cueVideoById(tape.id);
+    const request = { videoId: tape.id, startSeconds: start.seconds };
+    if (autoplay) player.loadVideoById(request);
+    else player.cueVideoById(request);
   }
 }
 
@@ -112,7 +89,8 @@ function readTrack(player: YTPlayer): Track | null {
 const pad2 = (n: number) => String(n).padStart(2, "0");
 
 export function TapeDeck() {
-  const [tapes, setTapes] = useTapes();
+  const [rack, updateRack] = useRack();
+  const tapes = rack.tapes;
   const [volume, setVolume] = useVolume();
   const [autoNext, setAutoNext] = useAutoNext();
   const [speed, setSpeed] = useSpeed();
@@ -128,12 +106,6 @@ export function TapeDeck() {
   const [wind, setWind] = useState<Wind | null>(null);
   const [track, setTrack] = useState<Track | null>(null);
   const [deckMessage, setDeckMessage] = useState<string | null>(null);
-
-  const [link, setLink] = useState("");
-  const [adding, setAdding] = useState(false);
-  const [formError, setFormError] = useState<string | null>(null);
-  // A pasted link pointing at a video inside a playlist: ask which one to record.
-  const [choice, setChoice] = useState<{ videoId: string; listId: string } | null>(null);
 
   // Mini mode shrinks the whole window into a compact player in the screen corner.
   const [mini, setMini] = useState(false);
@@ -157,8 +129,39 @@ export function TapeDeck() {
   const tape = slot?.tape ?? null;
   const hasTape = slot !== null;
 
+  // --- Resume positions ---------------------------------------------------------
+
+  const lastResumeSave = useRef(0);
+
+  /** Saves where the tape in the deck is up to, once it has actually played. */
+  function saveResume() {
+    const player = playerRef.current;
+    if (!slot || !player) return;
+    if (!["playing", "buffering", "paused", "ended"].includes(status)) return; // cued: nothing new to save
+    const d = player.getDuration() || 0;
+    if (d <= 0) return;
+    lastResumeSave.current = performance.now();
+    const t = player.getCurrentTime() || 0;
+    updateRack((r) =>
+      withResume(r, tapeKey(slot.tape), {
+        t,
+        d,
+        at: Date.now(),
+        ...(track && { track: track.index, n: track.count }),
+      }),
+    );
+  }
+
+  const onPageHide = useEffectEvent(() => saveResume());
+  useEffect(() => {
+    const handler = () => onPageHide();
+    window.addEventListener("pagehide", handler);
+    return () => window.removeEventListener("pagehide", handler);
+  }, []);
+
   function load(next: Tape, autoplay: boolean) {
-    setSlot({ tape: next, autoplay, insertedAt: Date.now() });
+    saveResume(); // remember where the outgoing tape was left
+    setSlot({ tape: next, autoplay, insertedAt: Date.now(), start: resumePoint(rack, tapeKey(next)) });
     setStatus("loading");
     setStopped(!autoplay);
     setTime(0);
@@ -198,6 +201,7 @@ export function TapeDeck() {
         break;
       case PlayerState.PAUSED:
         setStatus("paused");
+        saveResume();
         break;
       case PlayerState.CUED:
         setStatus("cued");
@@ -210,6 +214,7 @@ export function TapeDeck() {
 
         setStatus("ended");
         setStopped(true);
+        saveResume();
         const index = slot ? tapes.findIndex((t) => tapeKey(t) === tapeKey(slot.tape)) : -1;
         const next = index >= 0 ? tapes[index + 1] : undefined;
         if (autoNext && next) load(next, true);
@@ -301,21 +306,25 @@ export function TapeDeck() {
     if (playerRef.current) requestRate(playerRef.current, speed);
   }, [speed]);
 
-  // Follow the playhead, except while winding (the wind loop drives the display then).
+  // Follow the playhead (except while winding: the wind loop drives the display
+  // then), and save the position every few seconds while playing.
+  const onPoll = useEffectEvent(() => {
+    const player = playerRef.current;
+    if (!player) return;
+    setTime(player.getCurrentTime() || 0);
+    setDuration(player.getDuration() || 0);
+    const next = readTrack(player);
+    setTrack((previous) =>
+      previous && next && previous.index === next.index && previous.count === next.count && previous.title === next.title
+        ? previous
+        : next,
+    );
+    if (status === "playing" && performance.now() - lastResumeSave.current > RESUME_SAVE_MS) saveResume();
+  });
+
   useEffect(() => {
     if (!hasTape || wind) return;
-    const timer = window.setInterval(() => {
-      const player = playerRef.current;
-      if (!player) return;
-      setTime(player.getCurrentTime() || 0);
-      setDuration(player.getDuration() || 0);
-      const next = readTrack(player);
-      setTrack((previous) =>
-        previous && next && previous.index === next.index && previous.count === next.count && previous.title === next.title
-          ? previous
-          : next,
-      );
-    }, 250);
+    const timer = window.setInterval(() => onPoll(), 250);
     return () => window.clearInterval(timer);
   }, [hasTape, wind]);
 
@@ -355,6 +364,7 @@ export function TapeDeck() {
   function eject() {
     if (!slot) return;
     keyClick("clunk");
+    saveResume();
     setSlot(null);
     setPlayerReady(false);
     setStatus("empty");
@@ -569,6 +579,10 @@ export function TapeDeck() {
       } else {
         play();
       }
+    } else if (event.key === "Home") {
+      event.preventDefault();
+      keyClick();
+      seek(0); // rewind to the start of the tape (or the current mixtape track)
     } else if (event.key === "ArrowLeft") {
       event.preventDefault();
       nudge(-NUDGE_SECONDS);
@@ -603,64 +617,13 @@ export function TapeDeck() {
 
   // --- Tape rack --------------------------------------------------------------
 
-  function submitLink(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const parsed = parseYouTubeLink(link);
-    if (!parsed) {
-      setFormError("That doesn't look like a YouTube video or playlist link.");
-    } else if (parsed.videoId && parsed.listId) {
-      setFormError(null);
-      setChoice({ videoId: parsed.videoId, listId: parsed.listId });
-    } else if (parsed.listId) {
-      void record("playlist", parsed.listId);
-    } else if (parsed.videoId) {
-      void record("video", parsed.videoId);
-    } else {
-      setFormError(
-        "YouTube Mixes are made on the fly for each viewer, so they can't play here. Try a regular playlist link.",
-      );
-    }
-  }
-
-  async function record(kind: TapeKind, id: string) {
-    setChoice(null);
-    setFormError(null);
-
-    const existing = tapes.find((t) => kindOf(t) === kind && t.id === id);
-    if (existing) {
-      setLink("");
-      insert(existing);
-      return;
-    }
-
-    setAdding(true);
-    try {
-      const res = await fetch(`/api/tape?${kind === "playlist" ? "list" : "id"}=${encodeURIComponent(id)}`);
-      const data = (await res.json()) as { title?: string; author?: string; error?: string };
-      if (!res.ok || !data.title) {
-        setFormError(data.error ?? "Couldn't record that tape.");
-        return;
-      }
-      const added: Tape = {
-        ...(kind === "playlist" ? { kind } : {}),
-        id,
-        title: data.title,
-        author: data.author ?? "",
-      };
-      setTapes((previous) =>
-        previous.some((t) => tapeKey(t) === tapeKey(added)) ? previous : [...previous, added],
-      );
-      setLink("");
-      if (!slot) insert(added); // first tape goes straight into an empty deck
-    } catch {
-      setFormError("Couldn't reach the app's server. Is it still running?");
-    } finally {
-      setAdding(false);
-    }
+  function addTape(added: Tape, insertNow: boolean) {
+    updateRack((r) => withTape(r, added));
+    if (insertNow) insert(added); // the first tape goes straight into an empty deck
   }
 
   function removeTape(removed: Tape) {
-    setTapes((previous) => previous.filter((t) => tapeKey(t) !== tapeKey(removed)));
+    updateRack((r) => withoutTape(r, tapeKey(removed)));
   }
 
   // --- Display ----------------------------------------------------------------
@@ -668,7 +631,7 @@ export function TapeDeck() {
   const progress = duration > 0 ? Math.min(time / duration, 1) : 0;
   // On a mixtape the reels show how far through the whole playlist you are.
   const reelProgress = track ? Math.min((track.index + progress) / track.count, 1) : progress;
-  const isMixtape = tape ? kindOf(tape) === "playlist" : false;
+  const isMixtape = tape?.kind === "playlist";
   const cassetteNote = isMixtape ? (track ? `MIXTAPE · ${track.count} TRACKS` : "MIXTAPE") : undefined;
   const motion = wind ? wind.dir * 12 : status === "playing" ? speed : 0;
   const counter = String(Math.floor(time) % 1000).padStart(3, "0");
@@ -939,119 +902,19 @@ export function TapeDeck() {
             </div>
 
             <p className="deck-caption leading-relaxed normal-case tracking-normal">
-              Hold REW / FF to wind · Space play/pause · ← → skip 10s · Shift+N / Shift+P change track · Shift+&lt; / Shift+&gt; speed
+              Hold REW / FF to wind · Space play/pause · ← → skip 10s · Home rewind to start · Shift+N / Shift+P change track · Shift+&lt; / Shift+&gt; speed
             </p>
           </div>
         </section>
 
-        <section aria-labelledby="rack-heading" className="flex flex-col gap-4">
-          <div className="flex items-end justify-between gap-4">
-            <h2 id="rack-heading" className="font-marker text-2xl sm:text-3xl">
-              Tape rack
-            </h2>
-            <span className="text-sm text-muted">
-              {tapes.length} {tapes.length === 1 ? "tape" : "tapes"}
-            </span>
-          </div>
-
-          <form onSubmit={submitLink} className="flex flex-col gap-2 sm:flex-row">
-            <label htmlFor="tape-link" className="sr-only">
-              YouTube link
-            </label>
-            <input
-              id="tape-link"
-              type="text"
-              inputMode="url"
-              autoComplete="off"
-              spellCheck={false}
-              placeholder="Paste a YouTube video or playlist link"
-              value={link}
-              onChange={(e) => {
-                setLink(e.target.value);
-                setFormError(null);
-                setChoice(null);
-              }}
-              aria-invalid={formError ? true : undefined}
-              aria-describedby={formError ? "tape-link-error" : undefined}
-              className="field min-w-0 flex-1"
-            />
-            <button type="submit" className="btn-primary" disabled={adding || !link.trim()}>
-              {adding ? "Recording…" : "Record tape"}
-            </button>
-          </form>
-          {formError && (
-            <p id="tape-link-error" role="alert" className="text-sm text-danger">
-              {formError}
-            </p>
-          )}
-          {choice && (
-            <div role="group" aria-labelledby="choice-text" className="choice">
-              <p id="choice-text">This video is part of a playlist. What should go on the tape?</p>
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  className="btn-secondary"
-                  disabled={adding}
-                  onClick={() => void record("video", choice.videoId)}
-                >
-                  Just this video
-                </button>
-                <button
-                  type="button"
-                  className="btn-primary h-11"
-                  disabled={adding}
-                  onClick={() => void record("playlist", choice.listId)}
-                >
-                  Whole playlist
-                </button>
-              </div>
-            </div>
-          )}
-
-          {tapes.length === 0 ? (
-            <p className="rack-empty">
-              No tapes yet. Record one from a YouTube link and it goes straight into the deck.
-            </p>
-          ) : (
-            <ul className="grid gap-3 sm:grid-cols-2">
-              {tapes.map((t) => {
-                const inDeck = tape !== null && tapeKey(tape) === tapeKey(t);
-                const mixtape = kindOf(t) === "playlist";
-                return (
-                  <li
-                    key={tapeKey(t)}
-                    className="spine"
-                    data-active={inDeck || undefined}
-                    style={{ "--stripe": tapeColors(t.id)[0] } as CSSProperties}
-                  >
-                    <button type="button" className="spine-main" onClick={() => insert(t)}>
-                      <span className="spine-side" aria-hidden>
-                        A
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="sr-only">Insert </span>
-                        <span className="spine-title">{t.title}</span>
-                        <span className="spine-author">
-                          {mixtape && <span className="spine-mix">MIXTAPE</span>}
-                          {t.author || "Unknown artist"}
-                        </span>
-                      </span>
-                      {inDeck && <span className="spine-badge">IN DECK</span>}
-                    </button>
-                    <button
-                      type="button"
-                      className="spine-remove"
-                      aria-label={`Remove ${t.title}`}
-                      onClick={() => removeTape(t)}
-                    >
-                      ×
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </section>
+        <TapeRack
+          tapes={tapes}
+          activeKey={tape ? tapeKey(tape) : null}
+          deckEmpty={!slot}
+          onInsert={insert}
+          onAdd={addTape}
+          onRemove={removeTape}
+        />
 
         <footer className="text-sm text-muted">
           Videos play through YouTube&apos;s embedded player. Your tape rack is saved in this browser.

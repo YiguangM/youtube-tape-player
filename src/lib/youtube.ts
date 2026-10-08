@@ -4,8 +4,8 @@ export interface YTPlayer {
   playVideo(): void;
   pauseVideo(): void;
   seekTo(seconds: number, allowSeekAhead: boolean): void;
-  cueVideoById(videoId: string): void;
-  loadVideoById(videoId: string): void;
+  cueVideoById(video: string | YTVideoRequest): void;
+  loadVideoById(video: string | YTVideoRequest): void;
   cuePlaylist(playlist: YTPlaylistRequest): void;
   loadPlaylist(playlist: YTPlaylistRequest): void;
   nextVideo(): void;
@@ -25,10 +25,16 @@ export interface YTPlayer {
   destroy(): void;
 }
 
+interface YTVideoRequest {
+  videoId: string;
+  startSeconds?: number;
+}
+
 interface YTPlaylistRequest {
   list: string;
   listType: "playlist";
   index?: number;
+  startSeconds?: number;
 }
 
 interface YTPlayerEvent {
