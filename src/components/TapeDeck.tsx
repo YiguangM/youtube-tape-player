@@ -49,8 +49,8 @@ import {
   type Repeat,
   type Sequence,
 } from "@/lib/sequencer";
-import { useAutoNext, useRackSort, useRepeat, useShuffle, useSpeed, useVolume } from "@/lib/settings";
-import { keyClick } from "@/lib/sfx";
+import { useAutoNext, useRackSort, useRepeat, useShuffle, useSoundFx, useSpeed, useVolume } from "@/lib/settings";
+import { keyClick, setSoundEffects, startWhir } from "@/lib/sfx";
 import { useSleepTimer } from "@/lib/sleepTimer";
 import { PlayerState, coverUrl, formatTime, loadYouTubeApi, type YTPlayer } from "@/lib/youtube";
 
@@ -105,6 +105,8 @@ export function TapeDeck() {
   const [autoNext, setAutoNext] = useAutoNext();
   const [repeat, setRepeat] = useRepeat();
   const [shuffle, setShuffle] = useShuffle();
+  const [soundFx, setSoundFx] = useSoundFx();
+  useEffect(() => setSoundEffects(soundFx), [soundFx]);
   const [speed, setSpeed] = useSpeed();
   // Speeds the current video allows (null until it starts playing).
   const [availableRates, setAvailableRates] = useState<number[] | null>(null);
@@ -529,6 +531,7 @@ export function TapeDeck() {
 
     const total = player.getDuration() || 0;
     let position = wind.from;
+    const stopWhir = startWhir();
     const timer = window.setInterval(() => {
       const heldSeconds = (performance.now() - wind.startedAt) / 1000;
       position = clampToTape(position + wind.dir * Math.min(2 + heldSeconds * 4, 20), total);
@@ -539,6 +542,7 @@ export function TapeDeck() {
 
     return () => {
       window.clearInterval(timer);
+      stopWhir();
       if (playerRef.current !== player) return; // tape was ejected mid-wind
       const tapped = performance.now() - wind.startedAt < TAP_MS;
       const target = tapped ? clampToTape(wind.from + wind.dir * NUDGE_SECONDS, total) : position;
@@ -555,13 +559,13 @@ export function TapeDeck() {
   const keysReady = playerReady && status !== "loading";
 
   function insert(next: Tape) {
-    keyClick("clunk");
+    keyClick("insert");
     load(next, false);
   }
 
   function eject() {
     if (!slot) return;
-    keyClick("clunk");
+    keyClick("eject");
     saveResume();
     setSlot(null);
     setPlayerReady(false);
@@ -1215,6 +1219,9 @@ export function TapeDeck() {
                 options={REPEAT_OPTIONS}
                 onChange={changeRepeat}
               />
+            </div>
+
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
               <button
                 type="button"
                 className="toggle"
@@ -1237,6 +1244,20 @@ export function TapeDeck() {
               >
                 <span className={`led ${autoNext ? "led-on" : ""}`} aria-hidden />
                 AUTO NEXT
+              </button>
+              <button
+                type="button"
+                className="toggle"
+                aria-pressed={soundFx}
+                title="Mechanical sounds for the keys, tape door and winding"
+                onClick={() => {
+                  setSoundEffects(!soundFx);
+                  setSoundFx(!soundFx);
+                  keyClick(); // only heard when turning them on
+                }}
+              >
+                <span className={`led ${soundFx ? "led-on" : ""}`} aria-hidden />
+                SOUND FX
               </button>
             </div>
 

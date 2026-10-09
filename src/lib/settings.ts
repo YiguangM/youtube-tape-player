@@ -17,6 +17,8 @@ export const useRepeat = createStoredValue<Repeat>("tapedeck:repeat", "off", (va
   value === "off" || value === "one" || value === "all" ? value : undefined,
 );
 export const useShuffle = createStoredValue("tapedeck:shuffle", false, boolean);
+/** Mechanical sound effects: off unless the listener turns them on. */
+export const useSoundFx = createStoredValue("tapedeck:sound-fx", false, boolean);
 
 export const useRackSort = createStoredValue<RackSort>("tapedeck:rack-sort", "added", (value) =>
   value === "added" || value === "played" || value === "title" ? value : undefined,
