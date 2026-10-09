@@ -1,8 +1,19 @@
 "use client";
 
-import { useState, type CSSProperties, type FormEvent } from "react";
+import { useRef, useState, type CSSProperties, type FormEvent } from "react";
 import { tapeColors } from "./Cassette";
-import { tapeKey, type Tape, type TapeKind } from "@/lib/rackStore";
+import { AddToMixtapeDialog, MixtapeEditorDialog, NewMixtapeDialog } from "./MixtapeDialogs";
+import {
+  newMixtape,
+  tapeKey,
+  withMixtapeTracks,
+  withTape,
+  withUpdatedTape,
+  type CustomMixtape,
+  type Rack,
+  type Tape,
+  type Track,
+} from "@/lib/rackStore";
 import { parseYouTubeLink } from "@/lib/youtube";
 
 type TapeRackProps = {
@@ -13,11 +24,45 @@ type TapeRackProps = {
   /** A new tape was recorded; `insert` is true when the deck was empty */
   onAdd: (tape: Tape, insert: boolean) => void;
   onRemove: (tape: Tape) => void;
+  /** Applies an edit to the rack (used for building custom mixtapes) */
+  onUpdateRack: (update: (rack: Rack) => Rack) => void;
   deckEmpty: boolean;
 };
 
+type OpenDialog = { type: "new" } | { type: "add"; track: Track } | { type: "edit"; id: string } | null;
+
 /** The rack: record tapes from YouTube links, and pick one to put in the deck. */
-export function TapeRack({ tapes, activeKey, onInsert, onAdd, onRemove, deckEmpty }: TapeRackProps) {
+export function TapeRack({ tapes, activeKey, onInsert, onAdd, onRemove, onUpdateRack, deckEmpty }: TapeRackProps) {
+  const [dialog, setDialog] = useState<OpenDialog>(null);
+  // Short confirmations ("Added to Road trip"), announced to screen readers.
+  const [rackNotice, setRackNotice] = useState<string | null>(null);
+  const noticeTimer = useRef(0);
+  const mixtapes = tapes.filter((t): t is CustomMixtape => t.kind === "custom");
+
+  function notify(message: string) {
+    setRackNotice(message);
+    window.clearTimeout(noticeTimer.current);
+    noticeTimer.current = window.setTimeout(() => setRackNotice(null), 4000);
+  }
+
+  function createMixtape(name: string, firstTrack?: Track) {
+    const mix = newMixtape(name);
+    onUpdateRack((r) => withTape(r, { ...mix, tracks: firstTrack ? [firstTrack] : [] }));
+    notify(firstTrack ? `Added to ${mix.title}` : `Created ${mix.title}`);
+    return mix;
+  }
+
+  function addToMixtape(mixtapeId: string, track: Track) {
+    const mix = mixtapes.find((m) => m.id === mixtapeId);
+    if (!mix) return;
+    if (mix.tracks.some((t) => t.id === track.id)) {
+      notify(`Already on ${mix.title}`);
+      return;
+    }
+    onUpdateRack((r) => withMixtapeTracks(r, mixtapeId, [...mix.tracks, track]));
+    notify(`Added to ${mix.title}`);
+  }
+
   const [link, setLink] = useState("");
   const [adding, setAdding] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -43,7 +88,7 @@ export function TapeRack({ tapes, activeKey, onInsert, onAdd, onRemove, deckEmpt
     }
   }
 
-  async function record(kind: TapeKind, id: string) {
+  async function record(kind: "video" | "playlist", id: string) {
     setChoice(null);
     setFormError(null);
 
@@ -77,9 +122,17 @@ export function TapeRack({ tapes, activeKey, onInsert, onAdd, onRemove, deckEmpt
         <h2 id="rack-heading" className="font-marker text-2xl sm:text-3xl">
           Tape rack
         </h2>
-        <span className="text-sm text-muted">
-          {tapes.length} {tapes.length === 1 ? "tape" : "tapes"}
-        </span>
+        <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-2">
+          <span className="rack-notice" role="status" aria-live="polite">
+            {rackNotice}
+          </span>
+          <span className="text-sm text-muted">
+            {tapes.length} {tapes.length === 1 ? "tape" : "tapes"}
+          </span>
+          <button type="button" className="btn-secondary h-9 px-3 text-sm" onClick={() => setDialog({ type: "new" })}>
+            + New mixtape
+          </button>
+        </div>
       </div>
 
       <form onSubmit={submitLink} className="flex flex-col gap-2 sm:flex-row">
@@ -159,12 +212,36 @@ export function TapeRack({ tapes, activeKey, onInsert, onAdd, onRemove, deckEmpt
                     <span className="sr-only">Insert </span>
                     <span className="spine-title">{t.title}</span>
                     <span className="spine-author">
-                      {t.kind === "playlist" && <span className="spine-mix">MIXTAPE</span>}
-                      {t.author || "Unknown artist"}
+                      {t.kind !== "video" && <span className="spine-mix">{t.kind === "custom" ? "MY MIX" : "MIXTAPE"}</span>}
+                      {t.kind === "custom"
+                        ? `${t.tracks.length} ${t.tracks.length === 1 ? "track" : "tracks"}`
+                        : t.author || "Unknown artist"}
                     </span>
                   </span>
                   {inDeck && <span className="spine-badge">IN DECK</span>}
                 </button>
+                {t.kind === "video" && (
+                  <button
+                    type="button"
+                    className="spine-action"
+                    aria-label={`Add ${t.title} to a mixtape`}
+                    title="Add to a mixtape"
+                    onClick={() => setDialog({ type: "add", track: { id: t.id, title: t.title, author: t.author } })}
+                  >
+                    +
+                  </button>
+                )}
+                {t.kind === "custom" && (
+                  <button
+                    type="button"
+                    className="spine-action"
+                    aria-label={`Edit ${t.title}`}
+                    title="Rename, reorder or remove tracks"
+                    onClick={() => setDialog({ type: "edit", id: t.id })}
+                  >
+                    ✎
+                  </button>
+                )}
                 <button
                   type="button"
                   className="spine-remove"
@@ -178,6 +255,36 @@ export function TapeRack({ tapes, activeKey, onInsert, onAdd, onRemove, deckEmpt
           })}
         </ul>
       )}
+
+      {dialog?.type === "new" && (
+        <NewMixtapeDialog
+          onClose={() => setDialog(null)}
+          onCreate={(name) => createMixtape(name)}
+        />
+      )}
+      {dialog?.type === "add" && (
+        <AddToMixtapeDialog
+          track={dialog.track}
+          mixtapes={mixtapes}
+          onClose={() => setDialog(null)}
+          onAdd={(id) => addToMixtape(id, dialog.track)}
+          onCreateAndAdd={(name) => createMixtape(name, dialog.track)}
+        />
+      )}
+      {dialog?.type === "edit" &&
+        (() => {
+          const mix = mixtapes.find((m) => m.id === dialog.id);
+          if (!mix) return null;
+          return (
+            <MixtapeEditorDialog
+              mixtape={mix}
+              inDeck={activeKey === tapeKey(mix)}
+              onClose={() => setDialog(null)}
+              onRename={(name) => onUpdateRack((r) => withUpdatedTape(r, tapeKey(mix), (t) => ({ ...t, title: name })))}
+              onChangeTracks={(tracks) => onUpdateRack((r) => withMixtapeTracks(r, mix.id, tracks))}
+            />
+          );
+        })()}
     </section>
   );
 }

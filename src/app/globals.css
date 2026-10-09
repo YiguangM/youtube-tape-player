@@ -717,6 +717,152 @@ body.floating-body {
     letter-spacing: 0.14em;
   }
 
+  .spine-action {
+    display: grid;
+    place-items: center;
+    width: 44px;
+    border-left: 1px solid var(--card-border);
+    color: var(--muted);
+    font-size: 18px;
+    cursor: pointer;
+  }
+
+  .spine-action:hover {
+    color: var(--accent);
+  }
+
+  .spine-action:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+  }
+
+  .rack-notice {
+    color: var(--accent);
+    font-size: 14px;
+    font-weight: 600;
+  }
+
+  /* ---- Dialogs ---- */
+  .dialog {
+    width: min(520px, calc(100vw - 32px));
+    max-height: calc(100vh - 64px);
+    margin: auto;
+    padding: 0;
+    border: 1px solid var(--card-border);
+    border-radius: 16px;
+    background: var(--card);
+    box-shadow: 0 30px 60px -20px rgba(0, 0, 0, 0.5);
+    color: var(--foreground);
+  }
+
+  .dialog::backdrop {
+    background: rgba(10, 8, 6, 0.55);
+  }
+
+  .dialog-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 16px 18px 6px;
+  }
+
+  .dialog-close {
+    display: grid;
+    place-items: center;
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+    color: var(--muted);
+    font-size: 22px;
+    cursor: pointer;
+  }
+
+  .dialog-close:hover {
+    background: var(--background);
+  }
+
+  .dialog-body {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    padding: 8px 18px 18px;
+  }
+
+  .dialog :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  .mix-choice {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    width: 100%;
+    padding: 10px 14px;
+    border: 1px solid var(--card-border);
+    border-radius: 10px;
+    background: var(--background);
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .mix-choice:hover:not(:disabled) {
+    border-color: var(--accent);
+  }
+
+  .mix-choice:disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
+  }
+
+  .mix-tracks {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 50vh;
+    overflow: auto;
+  }
+
+  .mix-track {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    border: 1px solid var(--card-border);
+    border-radius: 10px;
+    background: var(--background);
+  }
+
+  .mix-track-no {
+    width: 24px;
+    color: var(--accent);
+    font-family: var(--font-vt323), ui-monospace, monospace;
+    font-size: 18px;
+  }
+
+  .mix-btn {
+    display: grid;
+    flex-shrink: 0;
+    place-items: center;
+    width: 34px;
+    height: 34px;
+    border: 1px solid var(--card-border);
+    border-radius: 8px;
+    color: var(--foreground);
+    cursor: pointer;
+  }
+
+  .mix-btn:hover:not(:disabled) {
+    border-color: var(--accent);
+  }
+
+  .mix-btn:disabled {
+    cursor: not-allowed;
+    opacity: 0.35;
+  }
+
   /* ---- Mixtape track buttons ---- */
   .track {
     display: inline-flex;

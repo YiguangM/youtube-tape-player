@@ -122,6 +122,8 @@ export function TapeDeck() {
   const resolvingPlaylist = useRef(false);
   // Unplayable tracks skipped in a row, so a mixtape of broken videos can't loop forever.
   const skippedInARow = useRef(0);
+  // Which way the listener last moved through a mixtape, so skips keep going that way.
+  const direction = useRef<1 | -1>(1);
 
   const track: Track | null = mix
     ? {
@@ -205,6 +207,21 @@ export function TapeDeck() {
       // the deck then plays them one by one so it controls the order.
       resolvingPlaylist.current = true;
       player.cuePlaylist({ list: loaded.tape.id, listType: "playlist", index: 0 });
+    } else if (loaded.tape.kind === "custom") {
+      // A custom mixtape already knows its videos and titles.
+      const tracks = loaded.tape.tracks;
+      if (tracks.length === 0) {
+        setStatus("jammed");
+        setDeckMessage("This mixtape is empty. Add tapes to it with the + button in the rack.");
+        return;
+      }
+      const first = Math.min(loaded.start.track, tracks.length - 1);
+      const titles = Object.fromEntries(tracks.map((t, i) => [i, t.title]));
+      playTrack(
+        { ids: tracks.map((t) => t.id), titles, sequence: startSequence(tracks.length, first, shuffle) },
+        loaded.autoplay,
+        first === loaded.start.track ? loaded.start.seconds : 0,
+      );
     } else {
       loadVideo(player, loaded.tape.id, loaded.autoplay, loaded.start.seconds);
     }
@@ -236,10 +253,17 @@ export function TapeDeck() {
   /** Moves a mixtape on by one track; false when the tape has run out. */
   function advanceMix(autoplay: boolean): boolean {
     if (!mix) return false;
+    direction.current = 1;
     const next = nextInSequence(mix.sequence, shuffle, repeat);
     if (!next) return false;
     playTrack({ ...mix, sequence: next }, autoplay);
     return true;
+  }
+
+  function stepBack(previous: Sequence) {
+    if (!mix) return;
+    direction.current = -1;
+    playTrack({ ...mix, sequence: previous }, true);
   }
 
   function replayCurrent() {
@@ -316,7 +340,11 @@ export function TapeDeck() {
     if (mix && skippedInARow.current < mix.ids.length) {
       skippedInARow.current += 1;
       showNotice(`Skipped track ${currentTrack(mix.sequence) + 1}: ${reason}`);
-      if (advanceMix(true)) return;
+      // Going back through the history? Keep going back past the broken track.
+      const previous = direction.current < 0 ? previousInSequence(mix.sequence, shuffle) : null;
+      if (previous) stepBack(previous);
+      else if (!advanceMix(true)) endOfTape();
+      return;
     }
     setStatus("jammed");
     setStopped(true);
@@ -500,11 +528,22 @@ export function TapeDeck() {
     setTime(target);
   }
 
+  // When the track was last restarted. YouTube reports the new position a moment
+  // late, so a quick second PREV would otherwise just restart the track again.
+  const restartedAt = useRef(0);
+
   function restartCurrent() {
     const player = playerRef.current;
     if (!player) return;
     player.seekTo(0, true);
     setTime(0);
+    restartedAt.current = performance.now();
+  }
+
+  /** Far enough into the track that PREV should restart it rather than go back. */
+  function pastTrackStart(player: YTPlayer) {
+    const justRestarted = performance.now() - restartedAt.current < RESTART_TRACK_AFTER * 1000;
+    return !justRestarted && (player.getCurrentTime() || 0) > RESTART_TRACK_AFTER;
   }
 
   // Mixtape track skipping, like a deck's music-search buttons. PREV restarts the
@@ -514,8 +553,8 @@ export function TapeDeck() {
     if (!player || !mix) return;
     keyClick();
     const previous = previousInSequence(mix.sequence, shuffle);
-    if ((player.getCurrentTime() || 0) > RESTART_TRACK_AFTER || !previous) restartCurrent();
-    else playTrack({ ...mix, sequence: previous }, true);
+    if (pastTrackStart(player) || !previous) restartCurrent();
+    else stepBack(previous);
   }
 
   function nextTrack() {
@@ -552,12 +591,12 @@ export function TapeDeck() {
     if (!player) return;
     const previousTape = rackNeighbour(-1);
     const previous = mix && previousInSequence(mix.sequence, shuffle);
-    if ((player.getCurrentTime() || 0) > RESTART_TRACK_AFTER || (!previous && !previousTape)) {
+    if (pastTrackStart(player) || (!previous && !previousTape)) {
       keyClick();
       restartCurrent();
     } else if (mix && previous) {
       keyClick();
-      playTrack({ ...mix, sequence: previous }, true);
+      stepBack(previous);
     } else if (previousTape) {
       keyClick("clunk");
       load(previousTape, true);
@@ -673,7 +712,7 @@ export function TapeDeck() {
       return;
     }
     const target = event.target as HTMLElement | null;
-    if (target?.closest("input, textarea, select, button, a, [role='slider'], [contenteditable='true']")) return;
+    if (target?.closest("input, textarea, select, button, a, dialog, [role='slider'], [contenteditable='true']")) return;
     const player = playerRef.current;
     if (event.key === ">" || event.key === "<") {
       event.preventDefault();
@@ -746,7 +785,7 @@ export function TapeDeck() {
   const progress = duration > 0 ? Math.min(time / duration, 1) : 0;
   // On a mixtape the reels show how far through the whole playlist you are.
   const reelProgress = track ? Math.min((track.index + progress) / track.count, 1) : progress;
-  const isMixtape = tape?.kind === "playlist";
+  const isMixtape = tape?.kind === "playlist" || tape?.kind === "custom";
   const cassetteNote = isMixtape ? (track ? `MIXTAPE · ${track.count} TRACKS` : "MIXTAPE") : undefined;
   const motion = wind ? wind.dir * 12 : status === "playing" ? speed : 0;
   const counter = String(Math.floor(time) % 1000).padStart(3, "0");
@@ -1075,6 +1114,7 @@ export function TapeDeck() {
           onInsert={insert}
           onAdd={addTape}
           onRemove={removeTape}
+          onUpdateRack={updateRack}
         />
 
         <footer className="text-sm text-muted">
