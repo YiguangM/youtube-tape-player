@@ -13,6 +13,7 @@ import { Cassette } from "./Cassette";
 import { ICONS, Key, SlideSwitch, SPEEDS, SpeedSelector } from "./controls";
 import { MiniPlayer } from "./MiniPlayer";
 import { TapeRack } from "./TapeRack";
+import { TapeCounter } from "./TapeCounter";
 import { VolumeKnob } from "./VolumeKnob";
 import {
   applyBounds,
@@ -116,7 +117,25 @@ export function TapeDeck() {
   const [deckMessage, setDeckMessage] = useState<string | null>(null);
   // A short-lived message on the display, e.g. a skipped track.
   const [notice, setNotice] = useState<string | null>(null);
+  // Tape counter: seconds of tape travel since RESET (follows winding and speed).
+  const [counter, setCounter] = useState(0);
+  const counterAt = useRef<{ video?: string; time: number }>({ time: 0 });
+  // A-B repeat: loops between two points once both are set.
+  const [loop, setLoop] = useState<{ a: number; b?: number } | null>(null);
   const noticeTimer = useRef(0);
+
+  /** Moves the counter by how far the tape travelled since the last reading. */
+  function moveCounter(video: string | undefined, seconds: number) {
+    const last = counterAt.current;
+    // A new video (the next mixtape track) carries on from where the counter is.
+    if (video && last.video === video && seconds !== last.time) setCounter((c) => c + (seconds - last.time));
+    counterAt.current = { video, time: seconds };
+  }
+
+  function resetCounter() {
+    keyClick();
+    setCounter(0);
+  }
 
   function showNotice(message: string) {
     setNotice(message);
@@ -202,6 +221,9 @@ export function TapeDeck() {
     setMix(null);
     setAvailableRates(null);
     setDeckMessage(null);
+    setLoop(null);
+    setCounter(0);
+    counterAt.current = { time: 0 };
   }
 
   /** Puts a tape into the player: a video directly, a playlist via its list of videos. */
@@ -237,6 +259,7 @@ export function TapeDeck() {
   /** Starts a mixtape playing from its sequence's current track. */
   function playTrack(next: Mix, autoplay: boolean, startSeconds = 0) {
     setMix(next);
+    setLoop(null);
     // Clear the old track's position so the slider waits for the new one.
     setTime(startSeconds);
     setDuration(0);
@@ -437,8 +460,17 @@ export function TapeDeck() {
   const onPoll = useEffectEvent(() => {
     const player = playerRef.current;
     if (!player) return;
-    setTime(player.getCurrentTime() || 0);
+    const now = player.getCurrentTime() || 0;
+    // A-B repeat: back to A once playback passes B.
+    if (loop?.b !== undefined && now >= loop.b) {
+      player.seekTo(loop.a, true);
+      setTime(loop.a);
+      moveCounter(currentVideo, loop.a);
+      return;
+    }
+    setTime(now);
     setDuration(player.getDuration() || 0);
+    moveCounter(currentVideo, now);
     // Learn each mixtape track's title and channel once its video has loaded.
     if (mix) {
       const index = currentTrack(mix.sequence);
@@ -458,6 +490,8 @@ export function TapeDeck() {
     return () => window.clearInterval(timer);
   }, [hasTape, wind]);
 
+  const onWindTick = useEffectEvent((position: number) => moveCounter(currentVideo, position));
+
   // Hold REW/FF to wind, speeding up the longer it's held. A quick tap skips 10s.
   useEffect(() => {
     const player = playerRef.current;
@@ -470,6 +504,7 @@ export function TapeDeck() {
       position = clampToTape(position + wind.dir * Math.min(2 + heldSeconds * 4, 20), total);
       player.seekTo(position, false);
       setTime(position);
+      onWindTick(position);
     }, 100);
 
     return () => {
@@ -479,6 +514,7 @@ export function TapeDeck() {
       const target = tapped ? clampToTape(wind.from + wind.dir * NUDGE_SECONDS, total) : position;
       player.seekTo(target, true);
       setTime(target);
+      onWindTick(target);
     };
   }, [wind]);
 
@@ -507,6 +543,7 @@ export function TapeDeck() {
     setMix(null);
     resolvingPlaylist.current = false;
     setDeckMessage(null);
+    setLoop(null);
   }
 
   function play() {
@@ -692,6 +729,18 @@ export function TapeDeck() {
     window.focus();
   }
 
+  /** A-B button: set A, then B (playback loops between them), then clear. */
+  function cycleLoop() {
+    const player = playerRef.current;
+    if (!player) return;
+    keyClick();
+    const now = player.getCurrentTime() || 0;
+    if (!loop) setLoop({ a: now });
+    else if (loop.b !== undefined) setLoop(null);
+    else if (now > loop.a + 1) setLoop({ a: loop.a, b: now });
+    else showNotice("Set B a little after A.");
+  }
+
   function seek(seconds: number) {
     const player = playerRef.current;
     const total = player?.getDuration() || 0;
@@ -801,7 +850,6 @@ export function TapeDeck() {
   const isMixtape = tape?.kind === "playlist" || tape?.kind === "custom";
   const cassetteNote = isMixtape ? (track ? `MIXTAPE · ${track.count} TRACKS` : "MIXTAPE") : undefined;
   const motion = wind ? wind.dir * 12 : status === "playing" ? speed : 0;
-  const counter = String(Math.floor(time) % 1000).padStart(3, "0");
   const playLatched = playing || (status === "paused" && !stopped);
   const pauseLatched = status === "paused" && !stopped;
 
@@ -979,9 +1027,16 @@ export function TapeDeck() {
           <div className="flex flex-col gap-5 px-4 pb-5 sm:px-6 sm:pb-6">
             <div className="vfd">
               <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1">
-                <span className="flex items-baseline gap-2">
-                  <span className="vfd-label">CNT</span>
-                  <span className="vfd-big">{counter}</span>
+                <span className="flex items-baseline gap-3" aria-hidden>
+                  <span className="vfd-ind" data-on={repeat !== "off" || undefined}>
+                    {repeat === "one" ? "RPT1" : "RPT"}
+                  </span>
+                  <span className="vfd-ind" data-on={(shuffle && isMixtape) || undefined}>
+                    SHUF
+                  </span>
+                  <span className="vfd-ind" data-on={loop?.b !== undefined || undefined}>
+                    A-B
+                  </span>
                 </span>
                 <span className="vfd-big" aria-live="polite">
                   {statusText}
@@ -1097,6 +1152,23 @@ export function TapeDeck() {
             </div>
 
             <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
+              <TapeCounter value={counter} onReset={resetCounter} />
+              <button
+                type="button"
+                className="ab-btn"
+                disabled={!keysReady}
+                aria-label={!loop ? "Set loop start (A)" : loop.b === undefined ? "Set loop end (B)" : "Clear the A-B loop"}
+                title="A-B repeat: press to set A, again to set B, a third time to clear"
+                onClick={cycleLoop}
+              >
+                A-B
+                <span className="ab-led" data-on={loop ? true : undefined} aria-hidden>
+                  <span className={`led ${loop ? "led-on" : ""}`} />A
+                </span>
+                <span className="ab-led" data-on={loop?.b !== undefined || undefined} aria-hidden>
+                  <span className={`led ${loop?.b !== undefined ? "led-on" : ""}`} />B
+                </span>
+              </button>
               <SlideSwitch
                 label="AUTO-REVERSE"
                 value={repeat}
