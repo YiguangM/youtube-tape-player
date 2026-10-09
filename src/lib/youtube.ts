@@ -14,7 +14,7 @@ export interface YTPlayer {
   getPlaylist(): string[] | null;
   getPlaylistIndex(): number;
   /** Undocumented but long-standing; used only to show the current track title. */
-  getVideoData?(): { title?: string };
+  getVideoData?(): { title?: string; video_id?: string };
   setPlaybackRate(rate: number): void;
   getPlaybackRate(): number;
   /** Speeds the current video allows; just [1] for live streams. */

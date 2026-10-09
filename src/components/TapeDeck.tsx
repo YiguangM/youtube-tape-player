@@ -10,7 +10,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { Cassette } from "./Cassette";
-import { ICONS, Key, SPEEDS, SpeedSelector } from "./controls";
+import { ICONS, Key, SlideSwitch, SPEEDS, SpeedSelector } from "./controls";
 import { MiniPlayer } from "./MiniPlayer";
 import { TapeRack } from "./TapeRack";
 import { VolumeKnob } from "./VolumeKnob";
@@ -33,7 +33,17 @@ import {
   withTape,
   type Tape,
 } from "@/lib/rackStore";
-import { useAutoNext, useSpeed, useVolume } from "@/lib/settings";
+import {
+  currentTrack,
+  hasNext,
+  nextInSequence,
+  previousInSequence,
+  reshuffle,
+  startSequence,
+  type Repeat,
+  type Sequence,
+} from "@/lib/sequencer";
+import { useAutoNext, useRepeat, useShuffle, useSpeed, useVolume } from "@/lib/settings";
 import { keyClick } from "@/lib/sfx";
 import { PlayerState, formatTime, loadYouTubeApi, type YTPlayer } from "@/lib/youtube";
 
@@ -42,6 +52,8 @@ type Status = "empty" | "loading" | "cued" | "playing" | "buffering" | "paused" 
 type Slot = { tape: Tape; autoplay: boolean; insertedAt: number; start: { seconds: number; track: number } };
 type Wind = { dir: 1 | -1; from: number; startedAt: number };
 type Track = { index: number; count: number; title: string };
+/** A mixtape being played: its video IDs, titles learned so far, and the play order. */
+type Mix = { ids: string[]; titles: Record<number, string>; sequence: Sequence };
 
 const PLAYER_ERRORS: Record<number, string> = {
   2: "That video ID isn't valid.",
@@ -57,33 +69,21 @@ const RESTART_TRACK_AFTER = 3; // PREV restarts the current track if it's this f
 const RATE_ECHO_MS = 3000; // how long YouTube may take to report back a speed we set
 const RESUME_SAVE_MS = 5000; // how often the playing position is saved
 
+const REPEAT_OPTIONS = [
+  { value: "off", label: "OFF", description: "Repeat off" },
+  { value: "one", label: "ONE", description: "Repeat the current track" },
+  { value: "all", label: "ALL", description: "Repeat the whole tape" },
+] as const;
+
 /** Keep seeks inside the tape, stopping just short of the end like a real deck. */
 function clampToTape(seconds: number, total: number) {
   return Math.min(Math.max(seconds, 0), Math.max(0, total - 0.5));
 }
 
-function loadIntoPlayer(player: YTPlayer, slot: Slot) {
-  const { tape, autoplay, start } = slot;
-  if (tape.kind === "playlist") {
-    const request = { list: tape.id, listType: "playlist" as const, index: start.track, startSeconds: start.seconds };
-    if (autoplay) player.loadPlaylist(request);
-    else player.cuePlaylist(request);
-  } else {
-    const request = { videoId: tape.id, startSeconds: start.seconds };
-    if (autoplay) player.loadVideoById(request);
-    else player.cueVideoById(request);
-  }
-}
-
-/** Where a playlist is up to, or null when a single video is loaded. */
-function readTrack(player: YTPlayer): Track | null {
-  const list = player.getPlaylist();
-  if (!list || list.length === 0) return null;
-  return {
-    index: Math.max(0, player.getPlaylistIndex()),
-    count: list.length,
-    title: player.getVideoData?.().title ?? "",
-  };
+function loadVideo(player: YTPlayer, videoId: string, autoplay: boolean, startSeconds = 0) {
+  const request = { videoId, startSeconds };
+  if (autoplay) player.loadVideoById(request);
+  else player.cueVideoById(request);
 }
 
 const pad2 = (n: number) => String(n).padStart(2, "0");
@@ -93,6 +93,8 @@ export function TapeDeck() {
   const tapes = rack.tapes;
   const [volume, setVolume] = useVolume();
   const [autoNext, setAutoNext] = useAutoNext();
+  const [repeat, setRepeat] = useRepeat();
+  const [shuffle, setShuffle] = useShuffle();
   const [speed, setSpeed] = useSpeed();
   // Speeds the current video allows (null until it starts playing).
   const [availableRates, setAvailableRates] = useState<number[] | null>(null);
@@ -104,8 +106,29 @@ export function TapeDeck() {
   const [time, setTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [wind, setWind] = useState<Wind | null>(null);
-  const [track, setTrack] = useState<Track | null>(null);
+  const [mix, setMix] = useState<Mix | null>(null);
   const [deckMessage, setDeckMessage] = useState<string | null>(null);
+  // A short-lived message on the display, e.g. a skipped track.
+  const [notice, setNotice] = useState<string | null>(null);
+  const noticeTimer = useRef(0);
+
+  function showNotice(message: string) {
+    setNotice(message);
+    window.clearTimeout(noticeTimer.current);
+    noticeTimer.current = window.setTimeout(() => setNotice(null), 5000);
+  }
+  // Set while a YouTube playlist is cued just to read its list of videos.
+  const resolvingPlaylist = useRef(false);
+  // Unplayable tracks skipped in a row, so a mixtape of broken videos can't loop forever.
+  const skippedInARow = useRef(0);
+
+  const track: Track | null = mix
+    ? {
+        index: currentTrack(mix.sequence),
+        count: mix.ids.length,
+        title: mix.titles[currentTrack(mix.sequence)] ?? "",
+      }
+    : null;
 
   // Mini mode shrinks the whole window into a compact player in the screen corner.
   const [mini, setMini] = useState(false);
@@ -167,9 +190,71 @@ export function TapeDeck() {
     setTime(0);
     setDuration(0);
     setWind(null);
-    setTrack(null);
+    setMix(null);
     setAvailableRates(null);
     setDeckMessage(null);
+  }
+
+  /** Puts a tape into the player: a video directly, a playlist via its list of videos. */
+  function loadSlot(player: YTPlayer, loaded: Slot) {
+    resolvingPlaylist.current = false;
+    skippedInARow.current = 0;
+    if (loaded.tape.kind === "playlist") {
+      // Cue the playlist only to learn its videos (see onPlayerState: CUED);
+      // the deck then plays them one by one so it controls the order.
+      resolvingPlaylist.current = true;
+      player.cuePlaylist({ list: loaded.tape.id, listType: "playlist", index: 0 });
+    } else {
+      loadVideo(player, loaded.tape.id, loaded.autoplay, loaded.start.seconds);
+    }
+  }
+
+  /** Starts a mixtape playing from its sequence's current track. */
+  function playTrack(next: Mix, autoplay: boolean, startSeconds = 0) {
+    setMix(next);
+    // Clear the old track's position so the slider waits for the new one.
+    setTime(startSeconds);
+    setDuration(0);
+    const player = playerRef.current;
+    if (player) loadVideo(player, next.ids[currentTrack(next.sequence)], autoplay, startSeconds);
+  }
+
+  /** Learned a playlist's videos: build the mixtape and cue its starting track. */
+  function startPlaylist(player: YTPlayer, loaded: Slot) {
+    const ids = (player.getPlaylist() ?? []).filter(Boolean);
+    if (ids.length === 0) {
+      setStatus("jammed");
+      setDeckMessage("This playlist is empty or can't be played here.");
+      return;
+    }
+    const first = Math.min(loaded.start.track, ids.length - 1);
+    const sequence = startSequence(ids.length, first, shuffle);
+    playTrack({ ids, titles: {}, sequence }, loaded.autoplay, first === loaded.start.track ? loaded.start.seconds : 0);
+  }
+
+  /** Moves a mixtape on by one track; false when the tape has run out. */
+  function advanceMix(autoplay: boolean): boolean {
+    if (!mix) return false;
+    const next = nextInSequence(mix.sequence, shuffle, repeat);
+    if (!next) return false;
+    playTrack({ ...mix, sequence: next }, autoplay);
+    return true;
+  }
+
+  function replayCurrent() {
+    const player = playerRef.current;
+    if (!player) return;
+    player.seekTo(0, true);
+    player.playVideo();
+  }
+
+  function endOfTape() {
+    setStatus("ended");
+    setStopped(true);
+    saveResume();
+    const index = slot ? tapes.findIndex((t) => tapeKey(t) === tapeKey(slot.tape)) : -1;
+    const next = index >= 0 ? tapes[index + 1] : undefined;
+    if (autoNext && next) load(next, true);
   }
 
   // --- YouTube player events -------------------------------------------------
@@ -179,7 +264,7 @@ export function TapeDeck() {
     setPlayerReady(true);
     player.setVolume(volume);
     requestRate(player, speed);
-    if (slot) loadIntoPlayer(player, slot);
+    if (slot) loadSlot(player, slot);
   });
 
   const onPlayerState = useEffectEvent((state: number) => {
@@ -188,6 +273,7 @@ export function TapeDeck() {
         setStatus("playing");
         setStopped(false);
         setDeckMessage(null);
+        skippedInARow.current = 0;
         // YouTube can reset the speed when a new video or track starts; keep ours.
         const player = playerRef.current;
         if (player) {
@@ -203,35 +289,33 @@ export function TapeDeck() {
         setStatus("paused");
         saveResume();
         break;
-      case PlayerState.CUED:
+      case PlayerState.CUED: {
+        const player = playerRef.current;
+        if (resolvingPlaylist.current && player && slot) {
+          resolvingPlaylist.current = false;
+          startPlaylist(player, slot);
+          break;
+        }
         setStatus("cued");
         setStopped(true);
         break;
-      case PlayerState.ENDED: {
-        // Mid-mixtape, YouTube moves on to the next track by itself.
-        const current = playerRef.current && readTrack(playerRef.current);
-        if (current && current.index < current.count - 1) break;
-
-        setStatus("ended");
-        setStopped(true);
-        saveResume();
-        const index = slot ? tapes.findIndex((t) => tapeKey(t) === tapeKey(slot.tape)) : -1;
-        const next = index >= 0 ? tapes[index + 1] : undefined;
-        if (autoNext && next) load(next, true);
-        break;
       }
+      case PlayerState.ENDED:
+        // AUTO-REVERSE: ONE replays the track; ALL loops the tape (a mixtape wraps
+        // around inside advanceMix). Otherwise move on, or the tape has ended.
+        if (repeat === "one" || (repeat === "all" && !mix)) replayCurrent();
+        else if (!advanceMix(true)) endOfTape();
+        break;
     }
   });
 
   const onPlayerError = useEffectEvent((code: number) => {
     const reason = PLAYER_ERRORS[code] ?? `The tape jammed (YouTube error ${code}).`;
     // One unplayable song shouldn't stop a whole mixtape: skip to the next track.
-    const player = playerRef.current;
-    const current = player && readTrack(player);
-    if (player && current && current.index < current.count - 1) {
-      setDeckMessage(`Skipped track ${current.index + 1}: ${reason}`);
-      player.nextVideo();
-      return;
+    if (mix && skippedInARow.current < mix.ids.length) {
+      skippedInARow.current += 1;
+      showNotice(`Skipped track ${currentTrack(mix.sequence) + 1}: ${reason}`);
+      if (advanceMix(true)) return;
     }
     setStatus("jammed");
     setStopped(true);
@@ -293,10 +377,11 @@ export function TapeDeck() {
   }, [hasTape]);
 
   // Swap tapes on an existing player. (A brand-new player loads the tape in onPlayerReady.)
-  useEffect(() => {
+  const onSlotChange = useEffectEvent(() => {
     const player = playerRef.current;
-    if (slot && player) loadIntoPlayer(player, slot);
-  }, [slot]);
+    if (slot && player) loadSlot(player, slot);
+  });
+  useEffect(() => onSlotChange(), [slot]);
 
   useEffect(() => {
     playerRef.current?.setVolume(volume);
@@ -313,12 +398,15 @@ export function TapeDeck() {
     if (!player) return;
     setTime(player.getCurrentTime() || 0);
     setDuration(player.getDuration() || 0);
-    const next = readTrack(player);
-    setTrack((previous) =>
-      previous && next && previous.index === next.index && previous.count === next.count && previous.title === next.title
-        ? previous
-        : next,
-    );
+    // Learn each mixtape track's title once its video has loaded.
+    if (mix) {
+      const index = currentTrack(mix.sequence);
+      const data = player.getVideoData?.();
+      const title = data?.title;
+      if (title && data.video_id === mix.ids[index] && mix.titles[index] !== title) {
+        setMix((m) => m && { ...m, titles: { ...m.titles, [index]: title } });
+      }
+    }
     if (status === "playing" && performance.now() - lastResumeSave.current > RESUME_SAVE_MS) saveResume();
   });
 
@@ -355,6 +443,8 @@ export function TapeDeck() {
   // --- Controls ---------------------------------------------------------------
 
   const playing = status === "playing" || status === "buffering";
+  // Not ready for transport keys yet: no player, or a tape (or playlist) still loading.
+  const keysReady = playerReady && status !== "loading";
 
   function insert(next: Tape) {
     keyClick("clunk");
@@ -372,7 +462,8 @@ export function TapeDeck() {
     setTime(0);
     setDuration(0);
     setWind(null);
-    setTrack(null);
+    setMix(null);
+    resolvingPlaylist.current = false;
     setDeckMessage(null);
   }
 
@@ -408,24 +499,43 @@ export function TapeDeck() {
     setTime(target);
   }
 
-  // Mixtape track skipping, like a deck's music-search buttons.
+  function restartCurrent() {
+    const player = playerRef.current;
+    if (!player) return;
+    player.seekTo(0, true);
+    setTime(0);
+  }
+
+  // Mixtape track skipping, like a deck's music-search buttons. PREV restarts the
+  // track if it's a few seconds in, otherwise steps back through what was played.
   function previousTrack() {
     const player = playerRef.current;
-    if (!player || !track) return;
+    if (!player || !mix) return;
     keyClick();
-    if (track.index === 0 || (player.getCurrentTime() || 0) > RESTART_TRACK_AFTER) {
-      player.seekTo(0, true);
-      setTime(0);
-    } else {
-      player.previousVideo();
-    }
+    const previous = previousInSequence(mix.sequence, shuffle);
+    if ((player.getCurrentTime() || 0) > RESTART_TRACK_AFTER || !previous) restartCurrent();
+    else playTrack({ ...mix, sequence: previous }, true);
   }
 
   function nextTrack() {
-    const player = playerRef.current;
-    if (!player || !track || track.index >= track.count - 1) return;
+    if (!mix || !hasNext(mix.sequence, repeat)) return;
     keyClick();
-    player.nextVideo();
+    advanceMix(true);
+  }
+
+  function changeRepeat(value: Repeat) {
+    keyClick();
+    setRepeat(value);
+    // Leaving ALL: drop tracks queued for another lap, so the tape ends at its end.
+    if (repeat === "all" && value !== "all") {
+      setMix((m) => m && { ...m, sequence: reshuffle(m.sequence, shuffle) });
+    }
+  }
+
+  function toggleShuffle() {
+    keyClick();
+    setShuffle(!shuffle);
+    setMix((m) => m && { ...m, sequence: reshuffle(m.sequence, !shuffle) });
   }
 
   // Mini player PREV / NEXT: through a mixtape's tracks, then on to the
@@ -440,14 +550,13 @@ export function TapeDeck() {
     const player = playerRef.current;
     if (!player) return;
     const previousTape = rackNeighbour(-1);
-    const onFirstTrack = !track || track.index === 0;
-    if ((player.getCurrentTime() || 0) > RESTART_TRACK_AFTER || (onFirstTrack && !previousTape)) {
+    const previous = mix && previousInSequence(mix.sequence, shuffle);
+    if ((player.getCurrentTime() || 0) > RESTART_TRACK_AFTER || (!previous && !previousTape)) {
       keyClick();
-      player.seekTo(0, true);
-      setTime(0);
-    } else if (!onFirstTrack) {
+      restartCurrent();
+    } else if (mix && previous) {
       keyClick();
-      player.previousVideo();
+      playTrack({ ...mix, sequence: previous }, true);
     } else if (previousTape) {
       keyClick("clunk");
       load(previousTape, true);
@@ -455,11 +564,10 @@ export function TapeDeck() {
   }
 
   function skipForward() {
-    const player = playerRef.current;
-    if (!player) return;
-    if (track && track.index < track.count - 1) {
+    if (!playerRef.current) return;
+    if (mix && hasNext(mix.sequence, repeat)) {
       keyClick();
-      player.nextVideo();
+      advanceMix(true);
       return;
     }
     const nextTape = rackNeighbour(1);
@@ -532,8 +640,14 @@ export function TapeDeck() {
   }
 
   function seek(seconds: number) {
-    playerRef.current?.seekTo(seconds, true);
-    setTime(seconds);
+    const player = playerRef.current;
+    const total = player?.getDuration() || 0;
+    if (!player || total <= 0) return; // still loading
+    // Stop just short of the end: a video sought to its very end may restart
+    // instead of finishing, and then the next track wouldn't follow.
+    const target = clampToTape(seconds, total);
+    player.seekTo(target, true);
+    setTime(target);
   }
 
   function startWind(dir: 1 | -1, event: ReactPointerEvent<HTMLButtonElement>) {
@@ -670,9 +784,9 @@ export function TapeDeck() {
     reelProgress,
     motion,
     playing,
-    ready: playerReady,
-    canPrevious: playerReady,
-    canNext: playerReady && ((!!track && track.index < track.count - 1) || !!rackNeighbour(1)),
+    ready: keysReady,
+    canPrevious: keysReady,
+    canNext: keysReady && ((!!mix && hasNext(mix.sequence, repeat)) || !!rackNeighbour(1)),
     onPrevious: skipBack,
     onPlayStop: playing ? stop : play,
     onNext: skipForward,
@@ -685,6 +799,7 @@ export function TapeDeck() {
 
   let displayLine = "Paste a YouTube link below to record a tape";
   if (deckMessage) displayLine = deckMessage;
+  else if (notice) displayLine = notice;
   else if (track) displayLine = `${pad2(track.index + 1)}/${pad2(track.count)}  ${track.title || tape?.title || ""}`;
   else if (tape) displayLine = `${tape.title}${tape.author ? ` · ${tape.author}` : ""}`;
 
@@ -807,7 +922,7 @@ export function TapeDeck() {
                 title="Hold to rewind, tap to skip back 10s"
                 icon={ICONS.rew}
                 down={wind?.dir === -1}
-                disabled={!playerReady}
+                disabled={!keysReady}
                 onPointerDown={(e) => startWind(-1, e)}
                 onPointerUp={endWind}
                 onPointerCancel={endWind}
@@ -820,7 +935,7 @@ export function TapeDeck() {
                 down={playLatched}
                 led={playing}
                 aria-pressed={playLatched}
-                disabled={!playerReady}
+                disabled={!keysReady}
                 onClick={play}
               />
               <Key
@@ -829,20 +944,20 @@ export function TapeDeck() {
                 title="Hold to fast forward, tap to skip ahead 10s"
                 icon={ICONS.ff}
                 down={wind?.dir === 1}
-                disabled={!playerReady}
+                disabled={!keysReady}
                 onPointerDown={(e) => startWind(1, e)}
                 onPointerUp={endWind}
                 onPointerCancel={endWind}
                 onLostPointerCapture={endWind}
                 onClick={(e) => e.detail === 0 && nudge(NUDGE_SECONDS)}
               />
-              <Key label="STOP" icon={ICONS.stop} disabled={!playerReady} onClick={stop} />
+              <Key label="STOP" icon={ICONS.stop} disabled={!keysReady} onClick={stop} />
               <Key
                 label="PAUSE"
                 icon={ICONS.pause}
                 down={pauseLatched}
                 aria-pressed={pauseLatched}
-                disabled={!playerReady}
+                disabled={!keysReady}
                 onClick={pause}
               />
               <Key label="EJECT" icon={ICONS.eject} className="key-eject" disabled={!slot} onClick={eject} />
@@ -859,7 +974,7 @@ export function TapeDeck() {
                   className="track-btn"
                   aria-label="Previous track"
                   title="Previous track (Shift+P)"
-                  disabled={!track || !playerReady}
+                  disabled={!mix || !keysReady}
                   onClick={previousTrack}
                 >
                   <span className="h-4 w-4" aria-hidden>
@@ -874,7 +989,7 @@ export function TapeDeck() {
                   className="track-btn"
                   aria-label="Next track"
                   title="Next track (Shift+N)"
-                  disabled={!track || !playerReady || track.index >= track.count - 1}
+                  disabled={!mix || !keysReady || !hasNext(mix.sequence, repeat)}
                   onClick={nextTrack}
                 >
                   <span className="h-4 w-4" aria-hidden>
@@ -882,6 +997,29 @@ export function TapeDeck() {
                   </span>
                 </button>
               </div>
+              <div className="flex items-center gap-3">
+                <span className="deck-caption">SPEED</span>
+                <SpeedSelector speed={speed} isAvailable={isSpeedAvailable} onChange={changeSpeed} />
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
+              <SlideSwitch
+                label="AUTO-REVERSE"
+                value={repeat}
+                options={REPEAT_OPTIONS}
+                onChange={changeRepeat}
+              />
+              <button
+                type="button"
+                className="toggle"
+                aria-pressed={shuffle}
+                title="Play mixtape tracks in a random order (no repeats until every track has played)"
+                onClick={toggleShuffle}
+              >
+                <span className={`led ${shuffle ? "led-on" : ""}`} aria-hidden />
+                SHUFFLE
+              </button>
               <button
                 type="button"
                 className="toggle"
@@ -895,10 +1033,6 @@ export function TapeDeck() {
                 <span className={`led ${autoNext ? "led-on" : ""}`} aria-hidden />
                 AUTO NEXT
               </button>
-              <div className="flex items-center gap-3">
-                <span className="deck-caption">SPEED</span>
-                <SpeedSelector speed={speed} isAvailable={isSpeedAvailable} onChange={changeSpeed} />
-              </div>
             </div>
 
             <p className="deck-caption leading-relaxed normal-case tracking-normal">

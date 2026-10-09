@@ -1,4 +1,5 @@
 // Deck settings that are remembered between visits.
+import type { Repeat } from "./sequencer";
 import { createStoredValue } from "./stored";
 
 const numberBetween = (min: number, max: number) => (value: unknown) =>
@@ -9,3 +10,9 @@ const boolean = (value: unknown) => (typeof value === "boolean" ? value : undefi
 export const useVolume = createStoredValue("tapedeck:volume", 80, numberBetween(0, 100));
 export const useSpeed = createStoredValue("tapedeck:speed", 1, numberBetween(0.25, 2));
 export const useAutoNext = createStoredValue("tapedeck:auto-next", true, boolean);
+
+/** AUTO-REVERSE switch: repeat nothing, the current track, or the whole tape. */
+export const useRepeat = createStoredValue<Repeat>("tapedeck:repeat", "off", (value) =>
+  value === "off" || value === "one" || value === "all" ? value : undefined,
+);
+export const useShuffle = createStoredValue("tapedeck:shuffle", false, boolean);

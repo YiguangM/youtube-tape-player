@@ -1,4 +1,4 @@
-import type { ComponentProps, ReactNode } from "react";
+import type { ComponentProps, CSSProperties, KeyboardEvent, ReactNode } from "react";
 
 type KeyProps = ComponentProps<"button"> & {
   label: string;
@@ -17,6 +17,64 @@ export function Key({ label, icon, down, led, className, ...props }: KeyProps) {
       </span>
       <span className="text-[10px] font-semibold tracking-[0.16em]">{label}</span>
     </button>
+  );
+}
+
+type SlideSwitchProps<T extends string> = {
+  label: string;
+  value: T;
+  options: readonly { value: T; label: string; description: string }[];
+  onChange: (value: T) => void;
+};
+
+/**
+ * A multi-position slide switch (a radio group). Click a position, or use the
+ * arrow keys when it's focused.
+ */
+export function SlideSwitch<T extends string>({ label, value, options, onChange }: SlideSwitchProps<T>) {
+  const index = Math.max(0, options.findIndex((o) => o.value === value));
+
+  function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[event.key];
+    if (!step) return;
+    event.preventDefault();
+    const next = options[(index + step + options.length) % options.length];
+    onChange(next.value);
+    // Keep focus on the newly selected position (roving tab stop).
+    const group = event.currentTarget;
+    requestAnimationFrame(() => group.querySelector<HTMLButtonElement>('[aria-checked="true"]')?.focus());
+  }
+
+  return (
+    <div className="flex items-center gap-3">
+      <span className="deck-caption" aria-hidden>
+        {label}
+      </span>
+      <div
+        role="radiogroup"
+        aria-label={label}
+        className="slide-switch"
+        style={{ "--positions": options.length, "--index": index } as CSSProperties}
+        onKeyDown={onKeyDown}
+      >
+        <span className="slide-knob" aria-hidden />
+        {options.map((option) => (
+          <button
+            key={option.value}
+            type="button"
+            role="radio"
+            aria-checked={option.value === value}
+            aria-label={option.description}
+            title={option.description}
+            tabIndex={option.value === value ? 0 : -1}
+            className="slide-pos"
+            onClick={() => onChange(option.value)}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+    </div>
   );
 }
 
