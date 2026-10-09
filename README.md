@@ -76,6 +76,10 @@ Then open [http://localhost:3000](http://localhost:3000).
 - `src/app/manifest.ts`, `src/app/icon.svg`, `public/icons/`: app name and icons
 - `launcher/`: the Windows launcher and shortcut installer
 
+## Known limitations
+
+- **Media keys and the Windows media flyout:** Tape Deck publishes what's playing and handles the media keys through the Media Session API, but in Chrome and Edge the YouTube player (which runs in its own iframe) registers a media session too, and the browser sends the system media controls to YouTube's. In practice: **Play/Pause works** (YouTube pauses and the deck follows), but **Next/Previous from the keyboard or the flyout don't change tracks or tapes**, and the flyout shows YouTube's title and artwork. Tested with Chrome and Edge on Windows. The deck's handlers stay in place for browsers that route media keys to the page.
+
 ## Credits
 
 The screenshots show footage from *Big Buck Bunny* (Blender Foundation) and *Wing It!* ([Blender Studio](https://studio.blender.org)), both released under Creative Commons Attribution (CC BY) licenses. Videos play through YouTube's embedded player.

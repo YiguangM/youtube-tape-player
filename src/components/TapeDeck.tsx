@@ -23,6 +23,7 @@ import {
   needsRecentring,
   type WindowBounds,
 } from "@/lib/appWindow";
+import { useMediaSession } from "@/lib/mediaSession";
 import { openFloatingWindow, useFloatingWindowSupported } from "@/lib/pip";
 import {
   resumePoint,
@@ -796,6 +797,32 @@ export function TapeDeck() {
     volume,
     onVolumeChange: setVolume,
   };
+
+  // The operating system's media controls and hardware media keys.
+  const currentVideo = mix ? mix.ids[currentTrack(mix.sequence)] : tape?.kind === "video" ? tape.id : undefined;
+  useMediaSession({
+    info: tape
+      ? {
+          title: track?.title || tape.title,
+          artist: tape.author,
+          album: isMixtape ? tape.title : "Tape Deck",
+          artwork: currentVideo ? `https://i.ytimg.com/vi/${currentVideo}/hqdefault.jpg` : undefined,
+        }
+      : null,
+    state: playing ? "playing" : slot ? "paused" : "none",
+    position: duration > 0 ? { duration, position: time, playbackRate: speed } : null,
+    hasPrevious: keysReady,
+    hasNext: miniPlayerProps.canNext,
+    actions: {
+      play,
+      pause: () => playing && pause(),
+      stop,
+      previousTrack: skipBack,
+      nextTrack: skipForward,
+      seekBy: nudge,
+      seekTo: seek,
+    },
+  });
 
   let displayLine = "Paste a YouTube link below to record a tape";
   if (deckMessage) displayLine = deckMessage;
