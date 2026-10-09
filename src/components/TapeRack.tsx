@@ -2,6 +2,7 @@
 
 import { useRef, useState, type CSSProperties, type FormEvent } from "react";
 import { tapeColors } from "./Cassette";
+import { ICONS } from "./controls";
 import { AddToMixtapeDialog, MixtapeEditorDialog, NewMixtapeDialog } from "./MixtapeDialogs";
 import {
   newMixtape,
@@ -14,7 +15,7 @@ import {
   type Tape,
   type Track,
 } from "@/lib/rackStore";
-import { parseYouTubeLink } from "@/lib/youtube";
+import { coverUrl, parseYouTubeLink } from "@/lib/youtube";
 
 type TapeRackProps = {
   tapes: Tape[];
@@ -220,6 +221,19 @@ export function TapeRack({ tapes, activeKey, onInsert, onAdd, onRemove, onUpdate
                   </span>
                   {inDeck && <span className="spine-badge">IN DECK</span>}
                 </button>
+                {t.kind === "video" && (
+                  <a
+                    className="spine-action"
+                    href={coverUrl(t.id, t.title, t.author)}
+                    download
+                    aria-label={`Save cover art for ${t.title}`}
+                    title="Save cover art (thumbnail)"
+                  >
+                    <span className="h-4 w-4" aria-hidden>
+                      {ICONS.cover}
+                    </span>
+                  </a>
+                )}
                 {t.kind === "video" && (
                   <button
                     type="button"

@@ -46,15 +46,15 @@ import {
 } from "@/lib/sequencer";
 import { useAutoNext, useRepeat, useShuffle, useSpeed, useVolume } from "@/lib/settings";
 import { keyClick } from "@/lib/sfx";
-import { PlayerState, formatTime, loadYouTubeApi, type YTPlayer } from "@/lib/youtube";
+import { PlayerState, coverUrl, formatTime, loadYouTubeApi, type YTPlayer } from "@/lib/youtube";
 
 type Status = "empty" | "loading" | "cued" | "playing" | "buffering" | "paused" | "ended" | "jammed";
 /** The tape in the deck, and where to start it. */
 type Slot = { tape: Tape; autoplay: boolean; insertedAt: number; start: { seconds: number; track: number } };
 type Wind = { dir: 1 | -1; from: number; startedAt: number };
 type Track = { index: number; count: number; title: string };
-/** A mixtape being played: its video IDs, titles learned so far, and the play order. */
-type Mix = { ids: string[]; titles: Record<number, string>; sequence: Sequence };
+/** A mixtape being played: its video IDs, titles and channels learned so far, and the play order. */
+type Mix = { ids: string[]; titles: Record<number, string>; authors: Record<number, string>; sequence: Sequence };
 
 const PLAYER_ERRORS: Record<number, string> = {
   2: "That video ID isn't valid.",
@@ -217,8 +217,9 @@ export function TapeDeck() {
       }
       const first = Math.min(loaded.start.track, tracks.length - 1);
       const titles = Object.fromEntries(tracks.map((t, i) => [i, t.title]));
+      const authors = Object.fromEntries(tracks.map((t, i) => [i, t.author]));
       playTrack(
-        { ids: tracks.map((t) => t.id), titles, sequence: startSequence(tracks.length, first, shuffle) },
+        { ids: tracks.map((t) => t.id), titles, authors, sequence: startSequence(tracks.length, first, shuffle) },
         loaded.autoplay,
         first === loaded.start.track ? loaded.start.seconds : 0,
       );
@@ -247,7 +248,7 @@ export function TapeDeck() {
     }
     const first = Math.min(loaded.start.track, ids.length - 1);
     const sequence = startSequence(ids.length, first, shuffle);
-    playTrack({ ids, titles: {}, sequence }, loaded.autoplay, first === loaded.start.track ? loaded.start.seconds : 0);
+    playTrack({ ids, titles: {}, authors: {}, sequence }, loaded.autoplay, first === loaded.start.track ? loaded.start.seconds : 0);
   }
 
   /** Moves a mixtape on by one track; false when the tape has run out. */
@@ -427,13 +428,14 @@ export function TapeDeck() {
     if (!player) return;
     setTime(player.getCurrentTime() || 0);
     setDuration(player.getDuration() || 0);
-    // Learn each mixtape track's title once its video has loaded.
+    // Learn each mixtape track's title and channel once its video has loaded.
     if (mix) {
       const index = currentTrack(mix.sequence);
       const data = player.getVideoData?.();
       const title = data?.title;
-      if (title && data.video_id === mix.ids[index] && mix.titles[index] !== title) {
-        setMix((m) => m && { ...m, titles: { ...m.titles, [index]: title } });
+      const author = data?.author ?? "";
+      if (title && data.video_id === mix.ids[index] && (mix.titles[index] !== title || (author && !mix.authors[index]))) {
+        setMix((m) => m && { ...m, titles: { ...m.titles, [index]: title }, authors: { ...m.authors, [index]: author || m.authors[index] } });
       }
     }
     if (status === "playing" && performance.now() - lastResumeSave.current > RESUME_SAVE_MS) saveResume();
@@ -887,6 +889,20 @@ export function TapeDeck() {
             <span className="deck-brand">TAPE DECK</span>
             <span className="deck-model">YT-85 · STEREO CASSETTE</span>
             <div className="ml-auto flex flex-wrap items-center justify-end gap-x-3 gap-y-2 sm:gap-x-4">
+              {currentVideo && (
+                <a
+                  className="plate-btn"
+                  href={coverUrl(currentVideo, track?.title || tape?.title || "", (mix && mix.authors[track?.index ?? -1]) || tape?.author || "")}
+                  download
+                  aria-label="Save cover art for what's playing"
+                  title="Save the cover art (thumbnail) of what's playing"
+                >
+                  <span className="h-3.5 w-3.5" aria-hidden>
+                    {ICONS.cover}
+                  </span>
+                  COVER
+                </a>
+              )}
               <button
                 type="button"
                 className="plate-btn"

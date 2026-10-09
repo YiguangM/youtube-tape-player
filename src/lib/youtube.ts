@@ -14,7 +14,7 @@ export interface YTPlayer {
   getPlaylist(): string[] | null;
   getPlaylistIndex(): number;
   /** Undocumented but long-standing; used only to show the current track title. */
-  getVideoData?(): { title?: string; video_id?: string };
+  getVideoData?(): { title?: string; author?: string; video_id?: string };
   setPlaybackRate(rate: number): void;
   getPlaybackRate(): number;
   /** Speeds the current video allows; just [1] for live streams. */
@@ -156,6 +156,12 @@ export function parseYouTubeLink(input: string): YouTubeLink | null {
 
   if (!video && !listId && !isMix) return null;
   return { videoId: video, listId, isMix };
+}
+
+/** Link that downloads a video's thumbnail as "Title - Channel.jpg" (see /api/cover). */
+export function coverUrl(videoId: string, title: string, author: string): string {
+  const params = new URLSearchParams({ id: videoId, title, author });
+  return `/api/cover?${params}`;
 }
 
 /** 83 -> "01:23", 3725 -> "1:02:05" */
