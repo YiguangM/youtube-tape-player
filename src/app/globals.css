@@ -983,6 +983,102 @@ body.floating-body {
     text-shadow: 0 0 6px rgba(255, 170, 60, 0.55);
   }
 
+  /* ---- Sleep timer dial ---- */
+  .sleep {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .sleep-face {
+    position: relative;
+    width: 100px;
+    height: 70px;
+  }
+
+  .sleep-dial {
+    position: absolute;
+    top: 16px;
+    left: 30px;
+    width: 40px;
+    height: 40px;
+    border-radius: 9999px;
+    cursor: pointer;
+  }
+
+  .sleep-dial:focus-visible {
+    outline: 2px solid var(--deck-accent);
+    outline-offset: 3px;
+  }
+
+  .sleep-cap {
+    position: absolute;
+    inset: 0;
+    border-radius: 9999px;
+    background: repeating-conic-gradient(#2e2e33 0deg 8deg, #7d7d86 8deg 16deg);
+    box-shadow:
+      0 0 0 1px #000,
+      0 3px 6px rgba(0, 0, 0, 0.6);
+    transform: rotate(var(--angle));
+    transition: transform 150ms ease-out;
+  }
+
+  .sleep-cap::before {
+    content: "";
+    position: absolute;
+    inset: 12%;
+    border-radius: 9999px;
+    background: conic-gradient(from 20deg, #e4e4e8, #9c9ca4 25%, #e6e6ea 50%, #92929a 75%, #e4e4e8);
+  }
+
+  .sleep-cap::after {
+    content: "";
+    position: absolute;
+    top: 12%;
+    left: 50%;
+    width: 3px;
+    height: 30%;
+    margin-left: -1.5px;
+    border-radius: 2px;
+    background: #ff6a26;
+    box-shadow: 0 0 4px rgba(255, 106, 38, 0.8);
+  }
+
+  .sleep-mark {
+    position: absolute;
+    top: 36px;
+    left: 50px;
+    color: #77726a;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    transform: translate(-50%, -50%) rotate(var(--angle)) translateY(-37px) rotate(calc(-1 * var(--angle)));
+    pointer-events: none;
+  }
+
+  .sleep-mark[data-on] {
+    color: #ffb54a;
+  }
+
+  .sleep-left {
+    position: absolute;
+    bottom: -14px;
+    left: 50%;
+    color: #ffb54a;
+    font-family: var(--font-vt323), ui-monospace, monospace;
+    font-size: 15px;
+    white-space: nowrap;
+    opacity: 0;
+    transform: translateX(-50%);
+    transition: opacity 0.15s;
+    pointer-events: none;
+  }
+
+  .sleep:hover .sleep-left,
+  .sleep:focus-within .sleep-left {
+    opacity: 1;
+  }
+
   /* ---- Mechanical tape counter ---- */
   .counter {
     display: inline-flex;
@@ -1355,6 +1451,7 @@ body.floating-body {
   }
   .knob-cap,
   .slide-knob,
+  .sleep-cap,
   .counter-strip[data-animate] {
     transition: none;
   }

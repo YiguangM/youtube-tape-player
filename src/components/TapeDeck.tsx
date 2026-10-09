@@ -13,6 +13,7 @@ import { Cassette } from "./Cassette";
 import { ICONS, Key, SlideSwitch, SPEEDS, SpeedSelector } from "./controls";
 import { MiniPlayer } from "./MiniPlayer";
 import { TapeRack } from "./TapeRack";
+import { SleepDial } from "./SleepDial";
 import { TapeCounter } from "./TapeCounter";
 import { VolumeKnob } from "./VolumeKnob";
 import {
@@ -50,6 +51,7 @@ import {
 } from "@/lib/sequencer";
 import { useAutoNext, useRackSort, useRepeat, useShuffle, useSpeed, useVolume } from "@/lib/settings";
 import { keyClick } from "@/lib/sfx";
+import { useSleepTimer } from "@/lib/sleepTimer";
 import { PlayerState, coverUrl, formatTime, loadYouTubeApi, type YTPlayer } from "@/lib/youtube";
 
 type Status = "empty" | "loading" | "cued" | "playing" | "buffering" | "paused" | "ended" | "jammed";
@@ -123,6 +125,28 @@ export function TapeDeck() {
   const counterAt = useRef<{ video?: string; time: number }>({ time: 0 });
   // A-B repeat: loops between two points once both are set.
   const [loop, setLoop] = useState<{ a: number; b?: number } | null>(null);
+  // Sleep timer: when it runs out, fade out over ~5 s, stop, and put the volume back.
+  const sleep = useSleepTimer(() => fadeOutAndStop());
+  const fadeTimer = useRef(0);
+
+  function fadeOutAndStop() {
+    const player = playerRef.current;
+    if (!player || !(status === "playing" || status === "buffering")) return;
+    const steps = 20;
+    let step = 0;
+    window.clearInterval(fadeTimer.current);
+    fadeTimer.current = window.setInterval(() => {
+      step += 1;
+      if (playerRef.current !== player) return window.clearInterval(fadeTimer.current); // ejected meanwhile
+      player.setVolume(Math.round(volume * (1 - step / steps)));
+      if (step < steps) return;
+      window.clearInterval(fadeTimer.current);
+      setStopped(true);
+      player.pauseVideo();
+      player.setVolume(volume);
+      showNotice("Sleep timer: stopped. Good night!");
+    }, 250);
+  }
   const noticeTimer = useRef(0);
 
   /** Moves the counter by how far the tape travelled since the last reading. */
@@ -1157,6 +1181,14 @@ export function TapeDeck() {
                 <span className="deck-caption">SPEED</span>
                 <SpeedSelector speed={speed} isAvailable={isSpeedAvailable} onChange={changeSpeed} />
               </div>
+              <SleepDial
+                minutes={sleep.minutes}
+                remaining={sleep.remaining}
+                onChange={(minutes) => {
+                  keyClick();
+                  sleep.set(minutes);
+                }}
+              />
             </div>
 
             <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
