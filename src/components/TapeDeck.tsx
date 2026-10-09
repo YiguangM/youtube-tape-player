@@ -35,6 +35,7 @@ import {
   withResume,
   withTape,
   withUpdatedTape,
+  labelText,
   type Tape,
 } from "@/lib/rackStore";
 import {
@@ -179,6 +180,11 @@ export function TapeDeck() {
 
   const tape = slot?.tape ?? null;
   const hasTape = slot !== null;
+  // The tape as it is in the rack now, so label and shell edits show straight away.
+  const liveTape = tape ? (tapes.find((t) => tapeKey(t) === tapeKey(tape)) ?? tape) : null;
+  const cassetteLook = liveTape
+    ? { id: liveTape.id, title: labelText(liveTape), author: liveTape.author, shell: liveTape.shell, font: liveTape.label?.font }
+    : null;
 
   // --- Resume positions ---------------------------------------------------------
 
@@ -871,7 +877,7 @@ export function TapeDeck() {
 
   // Shared by the corner mini player and the floating window.
   const miniPlayerProps = {
-    tape,
+    tape: cassetteLook,
     title: track?.title || tape?.title || "No tape in the deck",
     subtitle: !tape
       ? "Pick a tape in the rack"
@@ -1000,8 +1006,10 @@ export function TapeDeck() {
                 <div key={slot.insertedAt} className="tape-in">
                   <Cassette
                     id={tape.id}
-                    title={tape.title}
-                    author={tape.author}
+                    title={cassetteLook?.title ?? tape.title}
+                    author={tape.kind === "custom" ? "" : tape.author}
+                    shell={cassetteLook?.shell}
+                    font={cassetteLook?.font}
                     progress={reelProgress}
                     motion={motion}
                     note={cassetteNote}

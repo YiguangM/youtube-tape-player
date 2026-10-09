@@ -4,8 +4,9 @@
 // Version 2 (key "tapedeck:rack") wraps the tapes with a version number, adds
 // timestamps, and keeps a resume position per tape. Version 1 racks are migrated
 // automatically the first time the app loads. Later additions to version 2
-// (custom mixtapes) are new tape kinds or optional fields, so older version 2
-// racks still decode as they are.
+// (custom mixtapes, custom labels and shell colours) are new tape kinds or
+// optional fields, so older version 2 racks still decode as they are.
+import { SHELL_IDS, type LabelFont, type ShellId } from "./shells";
 import { createStoredValue, readStorage, removeStorage, writeStorage } from "./stored";
 import { isListId, isVideoId } from "./youtube";
 
@@ -14,12 +15,17 @@ const RACK_KEY = "tapedeck:rack";
 const LEGACY_KEY = "tapedeck:tapes";
 const BACKUP_KEY = "tapedeck:rack-unreadable";
 
+/** A handwritten-or-typed label the listener wrote on the cassette. */
+export type TapeLabel = { text: string; font: LabelFont };
+
 type TapeBase = {
   id: string;
   title: string;
   author: string;
   addedAt: number;
   playedAt?: number;
+  label?: TapeLabel;
+  shell?: ShellId;
 };
 export type VideoTape = TapeBase & { kind: "video" };
 /** A YouTube playlist, played as a mixtape. Read-only: YouTube owns its tracks. */
@@ -48,6 +54,7 @@ const MAX_TEXT = 300;
 const MAX_TRACKS = 500;
 const MIXTAPE_ID = /^m[a-z0-9]{6,24}$/;
 export const MAX_NAME = 80;
+export const MAX_LABEL = 60;
 
 export const tapeKey = (tape: { kind: TapeKind; id: string }) => `${tape.kind}:${tape.id}`;
 
@@ -78,15 +85,27 @@ function decodeTracks(value: unknown): Track[] | undefined {
   return tracks;
 }
 
+function decodeLabel(value: unknown): TapeLabel | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const v = value as Record<string, unknown>;
+  const labelText = typeof v.text === "string" ? v.text.slice(0, MAX_LABEL) : "";
+  const font: LabelFont = v.font === "typed" ? "typed" : "handwritten";
+  return labelText.trim() || font !== "handwritten" ? { text: labelText, font } : undefined;
+}
+
 export function decodeTape(value: unknown): Tape | undefined {
   if (!value || typeof value !== "object") return undefined;
   const v = value as Record<string, unknown>;
+  const label = decodeLabel(v.label);
+  const shell = SHELL_IDS.find((id) => id === v.shell);
   const base = {
     id: typeof v.id === "string" ? v.id : "",
     title: text(v.title) ?? "",
     author: text(v.author) ?? "",
     addedAt: nonNegative(v.addedAt) ?? 0,
     ...(nonNegative(v.playedAt) !== undefined && { playedAt: nonNegative(v.playedAt) }),
+    ...(label && { label }),
+    ...(shell && shell !== "smoke" && { shell }),
   };
   if (v.kind === "video" && isVideoId(base.id)) return { ...base, kind: "video" };
   if (v.kind === "playlist" && isListId(base.id)) return { ...base, kind: "playlist" };
@@ -189,6 +208,25 @@ export function withResume(rack: Rack, key: string, entry: Resume): Rack {
 
 export function withUpdatedTape(rack: Rack, key: string, update: (tape: Tape) => Tape): Rack {
   return { ...rack, tapes: rack.tapes.map((t) => (tapeKey(t) === key ? update(t) : t)) };
+}
+
+/** The text on the cassette label: the listener's own, or the video title. */
+export function labelText(tape: Tape): string {
+  return tape.label?.text.trim() || tape.title;
+}
+
+/** Sets or clears a tape's custom label and shell colour. */
+export function withLook(rack: Rack, key: string, label: TapeLabel | undefined, shell: ShellId | undefined): Rack {
+  return withUpdatedTape(rack, key, (t) => {
+    const next = { ...t };
+    delete next.label;
+    delete next.shell;
+    if (label && (label.text.trim() || label.font !== "handwritten")) {
+      next.label = { text: label.text.slice(0, MAX_LABEL), font: label.font };
+    }
+    if (shell && shell !== "smoke") next.shell = shell;
+    return next;
+  });
 }
 
 // --- Custom mixtapes ---------------------------------------------------------

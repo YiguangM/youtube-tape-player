@@ -4,13 +4,16 @@ import { useRef, useState, type CSSProperties, type FormEvent } from "react";
 import { tapeColors } from "./Cassette";
 import { ICONS } from "./controls";
 import { AddToMixtapeDialog, MixtapeEditorDialog, NewMixtapeDialog } from "./MixtapeDialogs";
+import { TapeLookDialog } from "./TapeLookDialog";
 import {
+  labelText,
   newMixtape,
   RACK_TOOLS_AFTER,
   rackOrder,
   tapeKey,
   withMixtapeTracks,
   withTape,
+  withLook,
   withUpdatedTape,
   type CustomMixtape,
   type Rack,
@@ -19,6 +22,7 @@ import {
   type Track,
 } from "@/lib/rackStore";
 import { useRackSort } from "@/lib/settings";
+import { labelFamily, shellById } from "@/lib/shells";
 import { coverUrl, parseYouTubeLink } from "@/lib/youtube";
 
 type TapeRackProps = {
@@ -34,7 +38,12 @@ type TapeRackProps = {
   deckEmpty: boolean;
 };
 
-type OpenDialog = { type: "new" } | { type: "add"; track: Track } | { type: "edit"; id: string } | null;
+type OpenDialog =
+  | { type: "new" }
+  | { type: "add"; track: Track }
+  | { type: "edit"; id: string }
+  | { type: "look"; key: string }
+  | null;
 
 /** The rack: record tapes from YouTube links, and pick one to put in the deck. */
 export function TapeRack({ tapes, activeKey, onInsert, onAdd, onRemove, onUpdateRack, deckEmpty }: TapeRackProps) {
@@ -49,7 +58,9 @@ export function TapeRack({ tapes, activeKey, onInsert, onAdd, onRemove, onUpdate
   const [query, setQuery] = useState("");
   const showTools = tapes.length > RACK_TOOLS_AFTER;
   const needle = showTools ? query.trim().toLocaleLowerCase() : "";
-  const shown = rackOrder(tapes, sort).filter((t) => !needle || t.title.toLocaleLowerCase().includes(needle));
+  const shown = rackOrder(tapes, sort).filter(
+    (t) => !needle || t.title.toLocaleLowerCase().includes(needle) || labelText(t).toLocaleLowerCase().includes(needle),
+  );
 
   function notify(message: string) {
     setRackNotice(message);
@@ -249,12 +260,18 @@ export function TapeRack({ tapes, activeKey, onInsert, onAdd, onRemove, onUpdate
                 style={{ "--stripe": tapeColors(t.id)[0] } as CSSProperties}
               >
                 <button type="button" className="spine-main" onClick={() => onInsert(t)}>
-                  <span className="spine-side" aria-hidden>
+                  <span
+                    className="spine-side"
+                    aria-hidden
+                    style={t.shell ? { background: shellById(t.shell).top, color: shellById(t.shell).ink } : undefined}
+                  >
                     A
                   </span>
                   <span className="min-w-0 flex-1">
                     <span className="sr-only">Insert </span>
-                    <span className="spine-title">{t.title}</span>
+                    <span className="spine-title" style={t.label ? { fontFamily: labelFamily(t.label.font) } : undefined}>
+                      {labelText(t)}
+                    </span>
                     <span className="spine-author">
                       {t.kind !== "video" && <span className="spine-mix">{t.kind === "custom" ? "MY MIX" : "MIXTAPE"}</span>}
                       {t.kind === "custom"
@@ -301,6 +318,17 @@ export function TapeRack({ tapes, activeKey, onInsert, onAdd, onRemove, onUpdate
                 )}
                 <button
                   type="button"
+                  className="spine-action"
+                  aria-label={`Change the label and shell of ${t.title}`}
+                  title="Label & shell"
+                  onClick={() => setDialog({ type: "look", key: tapeKey(t) })}
+                >
+                  <span className="h-4 w-4" aria-hidden>
+                    {ICONS.look}
+                  </span>
+                </button>
+                <button
+                  type="button"
                   className="spine-remove"
                   aria-label={`Remove ${t.title}`}
                   onClick={() => onRemove(t)}
@@ -328,6 +356,21 @@ export function TapeRack({ tapes, activeKey, onInsert, onAdd, onRemove, onUpdate
           onCreateAndAdd={(name) => createMixtape(name, dialog.track)}
         />
       )}
+      {dialog?.type === "look" &&
+        (() => {
+          const target = tapes.find((t) => tapeKey(t) === dialog.key);
+          if (!target) return null;
+          return (
+            <TapeLookDialog
+              tape={target}
+              onClose={() => setDialog(null)}
+              onSave={(label, shell) => {
+                onUpdateRack((r) => withLook(r, dialog.key, label, shell));
+                notify(`Updated ${target.title}`);
+              }}
+            />
+          );
+        })()}
       {dialog?.type === "edit" &&
         (() => {
           const mix = mixtapes.find((m) => m.id === dialog.id);

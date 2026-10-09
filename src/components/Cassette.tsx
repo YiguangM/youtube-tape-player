@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useId, useRef } from "react";
+import { labelFamily, shellById, type LabelFont, type ShellId } from "@/lib/shells";
 
 const LEFT = { x: 130, y: 114 };
 const RIGHT = { x: 270, y: 114 };
@@ -40,9 +41,15 @@ type CassetteProps = {
   motion: number;
   /** Small print on the bottom-right of the label */
   note?: string;
+  /** Shell colour (default smoke grey) */
+  shell?: ShellId;
+  /** Lettering on the label (default handwritten) */
+  font?: LabelFont;
 };
 
-export function Cassette({ id, title, author, progress, motion, note = "TYPE I Â· NORMAL" }: CassetteProps) {
+export function Cassette({ id, title, author, progress, motion, note = "TYPE I Â· NORMAL", shell, font }: CassetteProps) {
+  const look = shellById(shell);
+  const lettering = labelFamily(font);
   const uid = useId().replace(/[^a-zA-Z0-9_-]/g, "");
   const leftReel = useRef<SVGGElement>(null);
   const rightReel = useRef<SVGGElement>(null);
@@ -89,8 +96,8 @@ export function Cassette({ id, title, author, progress, motion, note = "TYPE I Â
     >
       <defs>
         <linearGradient id={`${uid}-shell`} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stopColor="#3b3b41" />
-          <stop offset="1" stopColor="#222226" />
+          <stop offset="0" stopColor={look.top} />
+          <stop offset="1" stopColor={look.bottom} />
         </linearGradient>
         <clipPath id={`${uid}-window`}>
           <rect x="86" y="80" width="228" height="68" rx="10" />
@@ -98,7 +105,7 @@ export function Cassette({ id, title, author, progress, motion, note = "TYPE I Â
       </defs>
 
       {/* Shell */}
-      <rect x="3" y="3" width="394" height="250" rx="14" fill={`url(#${uid}-shell)`} stroke="#0c0c0e" strokeWidth="2" />
+      <rect x="3" y="3" width="394" height="250" rx="14" fill={`url(#${uid}-shell)`} stroke={look.edge} strokeWidth="2" />
 
       {/* Label */}
       <rect x="24" y="18" width="352" height="162" rx="8" fill="#f3ecdc" />
@@ -109,9 +116,11 @@ export function Cassette({ id, title, author, progress, motion, note = "TYPE I Â
       </text>
       <line x1="64" y1="55" x2="362" y2="55" stroke="#d3c9b3" strokeWidth="1" />
       <foreignObject x="64" y="22" width="298" height="34">
-        <div className="cassette-title">{title}</div>
+        <div className="cassette-title" style={{ fontFamily: lettering, fontWeight: font === "typed" ? 700 : undefined }}>
+          {title}
+        </div>
       </foreignObject>
-      <text x="36" y="174" fontSize="11" fill="#4a433b" fontFamily="var(--font-permanent-marker), cursive">
+      <text x="36" y="174" fontSize="11" fill="#4a433b" fontFamily={lettering}>
         {author ? truncate(author, 34) : ""}
       </text>
       <text x="364" y="174" fontSize="8" letterSpacing="1" textAnchor="end" fill="#8a8072" fontFamily="var(--font-geist-sans), sans-serif">
@@ -136,7 +145,7 @@ export function Cassette({ id, title, author, progress, motion, note = "TYPE I Â
       <rect x="86" y="80" width="228" height="68" rx="10" fill="none" stroke="#0b0907" strokeWidth="2" />
 
       {/* Head opening along the bottom edge */}
-      <path d="M96 253 L116 196 H284 L304 253 Z" fill="#2d2d32" stroke="#0c0c0e" strokeWidth="1.5" />
+      <path d="M96 253 L116 196 H284 L304 253 Z" fill={look.base} stroke={look.edge} strokeWidth="1.5" />
       <rect x="112" y="247" width="176" height="3" fill="#4b3326" />
       <circle cx="136" cy="228" r="6" fill="#0b0b0c" />
       <circle cx="264" cy="228" r="6" fill="#0b0b0c" />

@@ -3,10 +3,11 @@
 import { Cassette } from "./Cassette";
 import { ICONS, Key, SpeedSelector } from "./controls";
 import { VolumeKnob } from "./VolumeKnob";
+import type { LabelFont, ShellId } from "@/lib/shells";
 import { formatTime } from "@/lib/youtube";
 
 type MiniPlayerProps = {
-  tape: { id: string; title: string; author: string } | null;
+  tape: { id: string; title: string; author: string; shell?: ShellId; font?: LabelFont } | null;
   title: string;
   subtitle: string;
   note?: string;
@@ -68,6 +69,8 @@ export function MiniPlayer(props: MiniPlayerProps) {
               progress={reelProgress}
               motion={motion}
               note={note}
+              shell={tape.shell}
+              font={tape.font}
             />
           ) : (
             <div className="bay-empty text-[10px]">No tape</div>
