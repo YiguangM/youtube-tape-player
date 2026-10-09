@@ -26,12 +26,14 @@ import {
 import { useMediaSession } from "@/lib/mediaSession";
 import { openFloatingWindow, useFloatingWindowSupported } from "@/lib/pip";
 import {
+  rackOrder,
   resumePoint,
   tapeKey,
   useRack,
   withoutTape,
   withResume,
   withTape,
+  withUpdatedTape,
   type Tape,
 } from "@/lib/rackStore";
 import {
@@ -44,7 +46,7 @@ import {
   type Repeat,
   type Sequence,
 } from "@/lib/sequencer";
-import { useAutoNext, useRepeat, useShuffle, useSpeed, useVolume } from "@/lib/settings";
+import { useAutoNext, useRackSort, useRepeat, useShuffle, useSpeed, useVolume } from "@/lib/settings";
 import { keyClick } from "@/lib/sfx";
 import { PlayerState, coverUrl, formatTime, loadYouTubeApi, type YTPlayer } from "@/lib/youtube";
 
@@ -92,6 +94,9 @@ const pad2 = (n: number) => String(n).padStart(2, "0");
 export function TapeDeck() {
   const [rack, updateRack] = useRack();
   const tapes = rack.tapes;
+  const [rackSort] = useRackSort();
+  // The rack as the listener sees it, which AUTO NEXT and PREV/NEXT tape follow.
+  const orderedTapes = rackOrder(tapes, rackSort);
   const [volume, setVolume] = useVolume();
   const [autoNext, setAutoNext] = useAutoNext();
   const [repeat, setRepeat] = useRepeat();
@@ -124,6 +129,7 @@ export function TapeDeck() {
   const skippedInARow = useRef(0);
   // Which way the listener last moved through a mixtape, so skips keep going that way.
   const direction = useRef<1 | -1>(1);
+  const markedPlayed = useRef(0);
 
   const track: Track | null = mix
     ? {
@@ -278,8 +284,8 @@ export function TapeDeck() {
     setStatus("ended");
     setStopped(true);
     saveResume();
-    const index = slot ? tapes.findIndex((t) => tapeKey(t) === tapeKey(slot.tape)) : -1;
-    const next = index >= 0 ? tapes[index + 1] : undefined;
+    const index = slot ? orderedTapes.findIndex((t) => tapeKey(t) === tapeKey(slot.tape)) : -1;
+    const next = index >= 0 ? orderedTapes[index + 1] : undefined;
     if (autoNext && next) load(next, true);
   }
 
@@ -300,6 +306,11 @@ export function TapeDeck() {
         setStopped(false);
         setDeckMessage(null);
         skippedInARow.current = 0;
+        if (slot && markedPlayed.current !== slot.insertedAt) {
+          // For "recently played" sorting: once per time the tape goes in.
+          markedPlayed.current = slot.insertedAt;
+          updateRack((r) => withUpdatedTape(r, tapeKey(slot.tape), (t) => ({ ...t, playedAt: Date.now() })));
+        }
         // YouTube can reset the speed when a new video or track starts; keep ours.
         const player = playerRef.current;
         if (player) {
@@ -584,8 +595,8 @@ export function TapeDeck() {
   // neighbouring tapes in the rack.
   function rackNeighbour(offset: 1 | -1): Tape | undefined {
     if (!slot) return undefined;
-    const index = tapes.findIndex((t) => tapeKey(t) === tapeKey(slot.tape));
-    return index >= 0 ? tapes[index + offset] : undefined;
+    const index = orderedTapes.findIndex((t) => tapeKey(t) === tapeKey(slot.tape));
+    return index >= 0 ? orderedTapes[index + offset] : undefined;
   }
 
   function skipBack() {

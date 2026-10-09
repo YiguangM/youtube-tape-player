@@ -6,15 +6,19 @@ import { ICONS } from "./controls";
 import { AddToMixtapeDialog, MixtapeEditorDialog, NewMixtapeDialog } from "./MixtapeDialogs";
 import {
   newMixtape,
+  RACK_TOOLS_AFTER,
+  rackOrder,
   tapeKey,
   withMixtapeTracks,
   withTape,
   withUpdatedTape,
   type CustomMixtape,
   type Rack,
+  type RackSort,
   type Tape,
   type Track,
 } from "@/lib/rackStore";
+import { useRackSort } from "@/lib/settings";
 import { coverUrl, parseYouTubeLink } from "@/lib/youtube";
 
 type TapeRackProps = {
@@ -39,6 +43,13 @@ export function TapeRack({ tapes, activeKey, onInsert, onAdd, onRemove, onUpdate
   const [rackNotice, setRackNotice] = useState<string | null>(null);
   const noticeTimer = useRef(0);
   const mixtapes = tapes.filter((t): t is CustomMixtape => t.kind === "custom");
+
+  // Search and sort only appear once the rack is big enough to need them.
+  const [sort, setSort] = useRackSort();
+  const [query, setQuery] = useState("");
+  const showTools = tapes.length > RACK_TOOLS_AFTER;
+  const needle = showTools ? query.trim().toLocaleLowerCase() : "";
+  const shown = rackOrder(tapes, sort).filter((t) => !needle || t.title.toLocaleLowerCase().includes(needle));
 
   function notify(message: string) {
     setRackNotice(message);
@@ -190,13 +201,45 @@ export function TapeRack({ tapes, activeKey, onInsert, onAdd, onRemove, onUpdate
         </div>
       )}
 
+      {showTools && (
+        <div className="rack-tools" role="search">
+          <label className="sr-only" htmlFor="rack-search">
+            Search the rack by title
+          </label>
+          <input
+            id="rack-search"
+            type="search"
+            className="field min-w-0 flex-1"
+            placeholder="Search tapes"
+            autoComplete="off"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+          <label className="sr-only" htmlFor="rack-sort">
+            Sort the rack
+          </label>
+          <select id="rack-sort" className="field rack-sort" value={sort} onChange={(e) => setSort(e.target.value as RackSort)}>
+            <option value="added">Recently added</option>
+            <option value="played">Recently played</option>
+            <option value="title">Title A–Z</option>
+          </select>
+          {needle && (
+            <span className="text-sm text-muted" aria-live="polite">
+              {shown.length} of {tapes.length}
+            </span>
+          )}
+        </div>
+      )}
+
       {tapes.length === 0 ? (
         <p className="rack-empty">
           No tapes yet. Record one from a YouTube link and it goes straight into the deck.
         </p>
+      ) : shown.length === 0 ? (
+        <p className="rack-empty">No tapes match “{query.trim()}”.</p>
       ) : (
         <ul className="grid gap-3 sm:grid-cols-2">
-          {tapes.map((t) => {
+          {shown.map((t) => {
             const inDeck = activeKey === tapeKey(t);
             return (
               <li

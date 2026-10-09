@@ -219,6 +219,28 @@ export function moveItem<T>(items: T[], from: number, to: number): T[] {
   return copy;
 }
 
+// --- Sorting ------------------------------------------------------------------
+
+export type RackSort = "added" | "played" | "title";
+/** The search and sort toolbar appears once the rack holds more tapes than this. */
+export const RACK_TOOLS_AFTER = 8;
+
+const byTitle = new Intl.Collator(undefined, { sensitivity: "base", numeric: true });
+
+export function sortTapes(tapes: Tape[], sort: RackSort): Tape[] {
+  const sorted = [...tapes];
+  if (sort === "title") return sorted.sort((a, b) => byTitle.compare(a.title, b.title));
+  if (sort === "played") {
+    return sorted.sort((a, b) => (b.playedAt ?? 0) - (a.playedAt ?? 0) || b.addedAt - a.addedAt);
+  }
+  return sorted.sort((a, b) => b.addedAt - a.addedAt);
+}
+
+/** The rack in the order it's shown: sorted once the toolbar is showing. */
+export function rackOrder(tapes: Tape[], sort: RackSort): Tape[] {
+  return tapes.length > RACK_TOOLS_AFTER ? sortTapes(tapes, sort) : tapes;
+}
+
 const NEAR_END = 10; // seconds: closer than this to the end starts over
 
 /**

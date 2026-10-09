@@ -1,4 +1,5 @@
 // Deck settings that are remembered between visits.
+import type { RackSort } from "./rackStore";
 import type { Repeat } from "./sequencer";
 import { createStoredValue } from "./stored";
 
@@ -16,3 +17,7 @@ export const useRepeat = createStoredValue<Repeat>("tapedeck:repeat", "off", (va
   value === "off" || value === "one" || value === "all" ? value : undefined,
 );
 export const useShuffle = createStoredValue("tapedeck:shuffle", false, boolean);
+
+export const useRackSort = createStoredValue<RackSort>("tapedeck:rack-sort", "added", (value) =>
+  value === "added" || value === "played" || value === "title" ? value : undefined,
+);

@@ -736,6 +736,28 @@ body.floating-body {
     outline-offset: -2px;
   }
 
+  .rack-tools {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 12px;
+  }
+
+  .rack-sort {
+    width: auto;
+    padding-right: 36px;
+    appearance: none;
+    background-image:
+      linear-gradient(45deg, transparent 50%, var(--muted) 50%),
+      linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+    background-position:
+      calc(100% - 18px) 21px,
+      calc(100% - 13px) 21px;
+    background-repeat: no-repeat;
+    background-size: 5px 5px;
+    cursor: pointer;
+  }
+
   .rack-notice {
     color: var(--accent);
     font-size: 14px;
