@@ -736,6 +736,23 @@ body.floating-body {
     outline-offset: -2px;
   }
 
+  .share-card {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 14px 16px;
+    border: 1.5px solid var(--accent);
+    border-radius: 12px;
+    background: var(--card);
+  }
+
+  .spine-action:disabled {
+    cursor: not-allowed;
+    opacity: 0.35;
+  }
+
   .rack-tools {
     display: flex;
     flex-wrap: wrap;

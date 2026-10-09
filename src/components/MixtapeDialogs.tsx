@@ -191,3 +191,38 @@ export function MixtapeEditorDialog({ mixtape, inDeck, onRename, onChangeTracks,
     </Dialog>
   );
 }
+
+export function ShareMixtapeDialog({ name, link, onClose }: { name: string; link: string; onClose: () => void }) {
+  const [copied, setCopied] = useState<"yes" | "failed" | null>(null);
+  return (
+    <Dialog title="Share mixtape" onClose={onClose}>
+      <p className="text-sm text-muted">
+        Anyone who opens this link in Tape Deck is asked whether to add <strong className="text-foreground">{name}</strong> to
+        their rack. It holds the name and the video IDs only.
+      </p>
+      <label className="sr-only" htmlFor="share-link">
+        Share link
+      </label>
+      <input id="share-link" className="field font-mono text-sm" readOnly value={link} onFocus={(e) => e.currentTarget.select()} />
+      <div className="flex flex-wrap items-center justify-end gap-3">
+        <span className="text-sm" role="status">
+          {copied === "yes" ? "Link copied" : copied === "failed" ? "Couldn't copy: select the link and copy it" : ""}
+        </span>
+        <button
+          type="button"
+          className="btn-primary h-11"
+          onClick={async () => {
+            try {
+              await navigator.clipboard.writeText(link);
+              setCopied("yes");
+            } catch {
+              setCopied("failed");
+            }
+          }}
+        >
+          Copy link
+        </button>
+      </div>
+    </Dialog>
+  );
+}

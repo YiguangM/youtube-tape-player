@@ -3,7 +3,7 @@
 import { useRef, useState, type CSSProperties, type FormEvent } from "react";
 import { tapeColors } from "./Cassette";
 import { ICONS } from "./controls";
-import { AddToMixtapeDialog, MixtapeEditorDialog, NewMixtapeDialog } from "./MixtapeDialogs";
+import { AddToMixtapeDialog, MixtapeEditorDialog, NewMixtapeDialog, ShareMixtapeDialog } from "./MixtapeDialogs";
 import { RackImportDialog } from "./RackImportDialog";
 import { TapeLookDialog } from "./TapeLookDialog";
 import {
@@ -24,6 +24,7 @@ import {
 } from "@/lib/rackStore";
 import { checkRackFile, downloadText, exportRack, mergeRacks, MAX_IMPORT_BYTES } from "@/lib/rackFile";
 import { useRackSort } from "@/lib/settings";
+import { clearLocationHash, mixtapeShareLink, readSharedMixtape, useLocationHash, type SharedMixtape } from "@/lib/shareLink";
 import { labelFamily, shellById } from "@/lib/shells";
 import { coverUrl, parseYouTubeLink } from "@/lib/youtube";
 
@@ -47,6 +48,7 @@ type OpenDialog =
   | { type: "edit"; id: string }
   | { type: "look"; key: string }
   | { type: "import"; incoming: Rack; skipped: number }
+  | { type: "share"; id: string }
   | null;
 
 /** The rack: record tapes from YouTube links, and pick one to put in the deck. */
@@ -90,6 +92,37 @@ export function TapeRack({ rack, activeKey, onInsert, onAdd, onRemove, onUpdateR
     }
     onUpdateRack((r) => withMixtapeTracks(r, mixtapeId, [...mix.tracks, track]));
     notify(`Added to ${mix.title}`);
+  }
+
+  // A shared mixtape link (#mix=…) opened the app: offer it, never add it on its own.
+  const shared = readSharedMixtape(useLocationHash());
+  const [addingShared, setAddingShared] = useState(false);
+
+  async function addShared(mix: SharedMixtape) {
+    setAddingShared(true);
+    // Look up titles a few at a time; unknown or unavailable videos still go on
+    // the tape and are skipped when played.
+    const tracks: Track[] = new Array(mix.ids.length);
+    let next = 0;
+    async function worker() {
+      while (next < mix.ids.length) {
+        const i = next++;
+        const id = mix.ids[i];
+        try {
+          const res = await fetch(`/api/tape?id=${id}`);
+          const data = (await res.json()) as { title?: string; author?: string };
+          tracks[i] = { id, title: res.ok && data.title ? data.title : "Unavailable video", author: data.author ?? "" };
+        } catch {
+          tracks[i] = { id, title: "Unknown video", author: "" };
+        }
+      }
+    }
+    await Promise.all([worker(), worker(), worker(), worker()]);
+    const created = newMixtape(mix.name);
+    onUpdateRack((r) => withTape(r, { ...created, tracks }));
+    clearLocationHash();
+    setAddingShared(false);
+    notify(`Added ${created.title} (${tracks.length} ${tracks.length === 1 ? "track" : "tracks"})`);
   }
 
   async function importFile(file: File) {
@@ -233,6 +266,23 @@ export function TapeRack({ rack, activeKey, onInsert, onAdd, onRemove, onUpdateR
           {adding ? "Recording…" : "Record tape"}
         </button>
       </form>
+      {shared && (
+        <section className="share-card" aria-labelledby="share-card-title">
+          <p id="share-card-title">
+            Add <strong className="font-marker">“{shared.name}”</strong> ({shared.ids.length}{" "}
+            {shared.ids.length === 1 ? "track" : "tracks"}) to your rack?
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" className="btn-secondary h-11" disabled={addingShared} onClick={clearLocationHash}>
+              Dismiss
+            </button>
+            <button type="button" className="btn-primary h-11" disabled={addingShared} onClick={() => void addShared(shared)}>
+              {addingShared ? "Adding…" : "Add to rack"}
+            </button>
+          </div>
+        </section>
+      )}
+
       {formError && (
         <p id="tape-link-error" role="alert" className="text-sm text-danger">
           {formError}
@@ -359,6 +409,20 @@ export function TapeRack({ rack, activeKey, onInsert, onAdd, onRemove, onUpdateR
                   <button
                     type="button"
                     className="spine-action"
+                    aria-label={`Share ${t.title}`}
+                    title={t.tracks.length ? "Share as a link" : "Add tracks before sharing"}
+                    disabled={t.tracks.length === 0}
+                    onClick={() => setDialog({ type: "share", id: t.id })}
+                  >
+                    <span className="h-4 w-4" aria-hidden>
+                      {ICONS.share}
+                    </span>
+                  </button>
+                )}
+                {t.kind === "custom" && (
+                  <button
+                    type="button"
+                    className="spine-action"
                     aria-label={`Edit ${t.title}`}
                     title="Rename, reorder or remove tracks"
                     onClick={() => setDialog({ type: "edit", id: t.id })}
@@ -406,6 +470,13 @@ export function TapeRack({ rack, activeKey, onInsert, onAdd, onRemove, onUpdateR
           onCreateAndAdd={(name) => createMixtape(name, dialog.track)}
         />
       )}
+      {dialog?.type === "share" &&
+        (() => {
+          const mix = mixtapes.find((m) => m.id === dialog.id);
+          if (!mix) return null;
+          const link = mixtapeShareLink(mix.title, mix.tracks.map((t) => t.id), window.location.origin + window.location.pathname);
+          return <ShareMixtapeDialog name={mix.title} link={link} onClose={() => setDialog(null)} />;
+        })()}
       {dialog?.type === "import" && (
         <RackImportDialog
           found={dialog.incoming.tapes.length}

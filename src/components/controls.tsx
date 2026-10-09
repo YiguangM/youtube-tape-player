@@ -157,6 +157,14 @@ export const ICONS = {
       <path d="M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7" />
     </svg>
   ),
+  share: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="6" cy="12" r="2.5" />
+      <circle cx="18" cy="6" r="2.5" />
+      <circle cx="18" cy="18" r="2.5" />
+      <path d="M8.2 10.8l7.6-3.6M8.2 13.2l7.6 3.6" />
+    </svg>
+  ),
   look: (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M4 20h4L19 9l-4-4L4 16z" />
