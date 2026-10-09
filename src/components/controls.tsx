@@ -167,8 +167,10 @@ export const ICONS = {
   ),
   look: (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M4 20h4L19 9l-4-4L4 16z" />
-      <path d="M13.5 6.5l4 4" />
+      <path d="M12 3a9 9 0 1 0 0 18c1.1 0 1.6-.8 1.6-1.6 0-1.2-1-1.4-1-2.4 0-.9.7-1.5 1.6-1.5H16a5 5 0 0 0 5-5c0-4.1-4-7.5-9-7.5z" />
+      <circle cx="7.5" cy="11" r="1" fill="currentColor" />
+      <circle cx="10" cy="7" r="1" fill="currentColor" />
+      <circle cx="15" cy="7.5" r="1" fill="currentColor" />
     </svg>
   ),
   cover: (
