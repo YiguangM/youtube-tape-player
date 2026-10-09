@@ -4,6 +4,7 @@ import { useRef, useState, type CSSProperties, type FormEvent } from "react";
 import { tapeColors } from "./Cassette";
 import { ICONS } from "./controls";
 import { AddToMixtapeDialog, MixtapeEditorDialog, NewMixtapeDialog } from "./MixtapeDialogs";
+import { RackImportDialog } from "./RackImportDialog";
 import { TapeLookDialog } from "./TapeLookDialog";
 import {
   labelText,
@@ -21,12 +22,14 @@ import {
   type Tape,
   type Track,
 } from "@/lib/rackStore";
+import { checkRackFile, downloadText, exportRack, mergeRacks, MAX_IMPORT_BYTES } from "@/lib/rackFile";
 import { useRackSort } from "@/lib/settings";
 import { labelFamily, shellById } from "@/lib/shells";
 import { coverUrl, parseYouTubeLink } from "@/lib/youtube";
 
 type TapeRackProps = {
-  tapes: Tape[];
+  /** The whole rack (for export and import); its tapes are shown */
+  rack: Rack;
   /** Key of the tape in the deck, if any */
   activeKey: string | null;
   onInsert: (tape: Tape) => void;
@@ -43,10 +46,13 @@ type OpenDialog =
   | { type: "add"; track: Track }
   | { type: "edit"; id: string }
   | { type: "look"; key: string }
+  | { type: "import"; incoming: Rack; skipped: number }
   | null;
 
 /** The rack: record tapes from YouTube links, and pick one to put in the deck. */
-export function TapeRack({ tapes, activeKey, onInsert, onAdd, onRemove, onUpdateRack, deckEmpty }: TapeRackProps) {
+export function TapeRack({ rack, activeKey, onInsert, onAdd, onRemove, onUpdateRack, deckEmpty }: TapeRackProps) {
+  const tapes = rack.tapes;
+  const fileInput = useRef<HTMLInputElement>(null);
   const [dialog, setDialog] = useState<OpenDialog>(null);
   // Short confirmations ("Added to Road trip"), announced to screen readers.
   const [rackNotice, setRackNotice] = useState<string | null>(null);
@@ -62,10 +68,10 @@ export function TapeRack({ tapes, activeKey, onInsert, onAdd, onRemove, onUpdate
     (t) => !needle || t.title.toLocaleLowerCase().includes(needle) || labelText(t).toLocaleLowerCase().includes(needle),
   );
 
-  function notify(message: string) {
+  function notify(message: string, ms = 4000) {
     setRackNotice(message);
     window.clearTimeout(noticeTimer.current);
-    noticeTimer.current = window.setTimeout(() => setRackNotice(null), 4000);
+    noticeTimer.current = window.setTimeout(() => setRackNotice(null), ms);
   }
 
   function createMixtape(name: string, firstTrack?: Track) {
@@ -84,6 +90,16 @@ export function TapeRack({ tapes, activeKey, onInsert, onAdd, onRemove, onUpdate
     }
     onUpdateRack((r) => withMixtapeTracks(r, mixtapeId, [...mix.tracks, track]));
     notify(`Added to ${mix.title}`);
+  }
+
+  async function importFile(file: File) {
+    if (file.size > MAX_IMPORT_BYTES) {
+      notify("That file is too big to be a Tape Deck rack.", 8000);
+      return;
+    }
+    const check = checkRackFile(await file.text(), file.size);
+    if (!check.ok) notify(check.error, 8000);
+    else setDialog({ type: "import", incoming: check.rack, skipped: check.skipped });
   }
 
   const [link, setLink] = useState("");
@@ -155,6 +171,40 @@ export function TapeRack({ tapes, activeKey, onInsert, onAdd, onRemove, onUpdate
           <button type="button" className="btn-secondary h-9 px-3 text-sm" onClick={() => setDialog({ type: "new" })}>
             + New mixtape
           </button>
+          <button
+            type="button"
+            className="btn-secondary h-9 px-3 text-sm"
+            disabled={tapes.length === 0}
+            title="Download your rack as a JSON file"
+            onClick={() => {
+              const file = exportRack(rack);
+              downloadText(file.name, file.text);
+              notify(`Exported ${tapes.length} ${tapes.length === 1 ? "tape" : "tapes"}`);
+            }}
+          >
+            Export
+          </button>
+          <button
+            type="button"
+            className="btn-secondary h-9 px-3 text-sm"
+            title="Load a rack from an exported JSON file"
+            onClick={() => fileInput.current?.click()}
+          >
+            Import
+          </button>
+          <input
+            ref={fileInput}
+            type="file"
+            accept="application/json,.json"
+            className="sr-only"
+            tabIndex={-1}
+            aria-label="Rack file to import"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              e.target.value = ""; // allow picking the same file again
+              if (file) void importFile(file);
+            }}
+          />
         </div>
       </div>
 
@@ -354,6 +404,24 @@ export function TapeRack({ tapes, activeKey, onInsert, onAdd, onRemove, onUpdate
           onClose={() => setDialog(null)}
           onAdd={(id) => addToMixtape(id, dialog.track)}
           onCreateAndAdd={(name) => createMixtape(name, dialog.track)}
+        />
+      )}
+      {dialog?.type === "import" && (
+        <RackImportDialog
+          found={dialog.incoming.tapes.length}
+          skipped={dialog.skipped}
+          currentCount={tapes.length}
+          onClose={() => setDialog(null)}
+          onMerge={() => {
+            const merged = mergeRacks(rack, dialog.incoming);
+            onUpdateRack(() => merged.rack);
+            notify(`Added ${merged.added}, skipped ${merged.duplicates} already in the rack`);
+          }}
+          onReplace={() => {
+            onUpdateRack(() => dialog.incoming);
+            const n = dialog.incoming.tapes.length;
+            notify(`Rack replaced: ${n} ${n === 1 ? "tape" : "tapes"}`);
+          }}
         />
       )}
       {dialog?.type === "look" &&

@@ -1268,7 +1268,7 @@ export function TapeDeck() {
         </section>
 
         <TapeRack
-          tapes={tapes}
+          rack={rack}
           activeKey={tape ? tapeKey(tape) : null}
           deckEmpty={!slot}
           onInsert={insert}
