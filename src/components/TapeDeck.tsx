@@ -21,7 +21,8 @@ import {
   cornerBounds,
   currentBounds,
   fullBounds,
-  MINI_CONTENT,
+  isAppWindow,
+  MINI_CONTROLS,
   needsRecentring,
   type WindowBounds,
 } from "@/lib/appWindow";
@@ -176,6 +177,9 @@ export function TapeDeck() {
   // Which way the listener last moved through a mixtape, so skips keep going that way.
   const direction = useRef<1 | -1>(1);
   const markedPlayed = useRef(0);
+  // YouTube ignores a pause while a video is still starting, so STOP pressed just
+  // after PLAY is re-applied when playback actually begins.
+  const stopRequestedAt = useRef(0);
 
   const track: Track | null = mix
     ? {
@@ -357,6 +361,11 @@ export function TapeDeck() {
   const onPlayerState = useEffectEvent((state: number) => {
     switch (state) {
       case PlayerState.PLAYING: {
+        if (performance.now() - stopRequestedAt.current < 2000) {
+          stopRequestedAt.current = 0;
+          playerRef.current?.pauseVideo();
+          break;
+        }
         setStatus("playing");
         setStopped(false);
         setDeckMessage(null);
@@ -376,6 +385,15 @@ export function TapeDeck() {
       }
       case PlayerState.BUFFERING:
         setStatus("buffering");
+        break;
+      case PlayerState.UNSTARTED:
+        // STOP while YouTube was still starting the video sends it back to
+        // "not started" rather than "paused": that's stopped too.
+        if (performance.now() - stopRequestedAt.current < 2000) {
+          stopRequestedAt.current = 0;
+          setStatus("paused");
+          setStopped(true);
+        }
         break;
       case PlayerState.PAUSED:
         setStatus("paused");
@@ -584,6 +602,7 @@ export function TapeDeck() {
     const player = playerRef.current;
     if (!player) return;
     keyClick();
+    stopRequestedAt.current = 0;
     setStopped(false);
     player.playVideo();
   }
@@ -601,7 +620,10 @@ export function TapeDeck() {
     if (!player) return;
     keyClick();
     setStopped(true);
-    if (playing) player.pauseVideo();
+    if (playing) {
+      stopRequestedAt.current = performance.now();
+      player.pauseVideo();
+    }
   }
 
   function nudge(seconds: number) {
@@ -717,6 +739,16 @@ export function TapeDeck() {
     if (next !== undefined) changeSpeed(next);
   }
 
+  /**
+   * MINI PLAYER: in the app window (desktop icon), shrink the window into the
+   * screen corner. In a normal browser tab, which can't resize itself, open the
+   * floating always-on-top window instead (Chrome and Edge).
+   */
+  function openMiniPlayer() {
+    if (isAppWindow() || !floatingSupported) enterMini();
+    else void toggleFloating();
+  }
+
   function enterMini() {
     keyClick();
     const before = currentBounds();
@@ -727,7 +759,7 @@ export function TapeDeck() {
     window.setTimeout(() => {
       if (window.outerWidth === before.width && window.outerHeight === before.height) {
         setMini(false);
-        setDeckMessage("Mini mode needs the Tape Deck app window. Open it from the desktop icon.");
+        setDeckMessage("The mini player needs Chrome or Edge, or the Tape Deck app window from the desktop icon.");
       }
     }, 600);
   }
@@ -747,7 +779,7 @@ export function TapeDeck() {
       return;
     }
     try {
-      const floating = await openFloatingWindow(MINI_CONTENT.width, MINI_CONTENT.height);
+      const floating = await openFloatingWindow(MINI_CONTROLS.width, MINI_CONTROLS.height);
       if (!floating) return;
       floating.document.body.className = "floating-body";
       floating.addEventListener("pagehide", () => setFloatWindow(null), { once: true });
@@ -966,10 +998,9 @@ export function TapeDeck() {
 
   return (
     <div className="flex flex-1 flex-col" data-mini={mini || undefined}>
-      <div
-        className="full-layout mx-auto flex w-full max-w-5xl flex-col gap-10 px-4 py-8 sm:px-6 sm:py-12"
-        inert={mini}
-      >
+      {/* In mini mode this is hidden with visibility (so it can't be clicked or
+          focused), except the video, which stays visible and usable. */}
+      <div className="full-layout mx-auto flex w-full max-w-5xl flex-col gap-10 px-4 py-8 sm:px-6 sm:py-12">
         <header className="flex flex-col gap-2">
           <h1 className="font-marker text-4xl sm:text-5xl">Tape Deck</h1>
           <p className="text-muted">
@@ -999,8 +1030,8 @@ export function TapeDeck() {
               <button
                 type="button"
                 className="plate-btn"
-                title="Shrink Tape Deck into a mini player in the corner of your screen"
-                onClick={enterMini}
+                title="Mini player: shrinks the app window into the screen corner, or floats on top in a browser tab"
+                onClick={openMiniPlayer}
               >
                 <span className="h-3.5 w-3.5" aria-hidden>
                   {ICONS.corner}

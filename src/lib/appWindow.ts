@@ -3,8 +3,19 @@
 
 export type WindowBounds = { x: number; y: number; width: number; height: number };
 
-/** Size of the page inside the mini window, in CSS pixels. */
-export const MINI_CONTENT = { width: 380, height: 272 };
+/** The mini player's controls, in CSS pixels (also the floating window's size). */
+export const MINI_CONTROLS = { width: 380, height: 272 };
+/**
+ * The corner mini window shows the video above the controls: YouTube's embed
+ * rules don't allow a playing player to be hidden, and it must be 200x200+.
+ */
+export const MINI_VIDEO_HEIGHT = 214; // 16:9 at 380 wide
+export const MINI_CONTENT = { width: MINI_CONTROLS.width, height: MINI_VIDEO_HEIGHT + MINI_CONTROLS.height };
+
+/** Running in its own app window (desktop icon or installed app), which may resize itself. */
+export function isAppWindow(): boolean {
+  return window.matchMedia("(display-mode: standalone), (display-mode: minimal-ui)").matches;
+}
 const CORNER_MARGIN = 12;
 const FULL_SIZE = { width: 1120, height: 1000 }; // matches the launcher's --window-size
 
@@ -85,6 +96,6 @@ export function needsRecentring(): boolean {
     window.screenY < top - slack ||
     window.screenX + window.outerWidth > left + screen.availWidth + slack ||
     window.screenY + window.outerHeight > top + screen.availHeight + slack;
-  const miniSized = window.outerWidth < 560 && window.outerHeight < 480;
+  const miniSized = window.outerWidth < 560 && window.outerHeight < 640;
   return offScreen || miniSized;
 }

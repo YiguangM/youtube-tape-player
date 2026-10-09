@@ -58,9 +58,10 @@ body {
   font-family: var(--font-geist-sans), system-ui, sans-serif;
 }
 
-/* Mini mode: the deck is hidden, but the YouTube player stays rendered behind the
-   mini player (fixed to the window) so playback carries on uninterrupted. These
-   sit outside the layers so they win over the player's layout utilities. */
+/* Mini mode: the deck is hidden; the YouTube player stays visible across the top
+   of the mini window (YouTube's embed rules don't allow hiding a playing player)
+   with the mini controls below it. These sit outside the layers so they win over
+   the player's layout utilities. */
 html:has([data-mini]) {
   overflow: hidden;
 }
@@ -71,10 +72,19 @@ html:has([data-mini]) {
 
 [data-mini] .screen-host {
   position: fixed;
-  inset: 0;
+  top: 0;
+  right: 0;
+  bottom: auto;
+  left: 0;
   z-index: 0;
+  height: 214px; /* MINI_VIDEO_HEIGHT in lib/appWindow.ts */
+  min-height: 0;
   border-radius: 0;
   visibility: visible;
+}
+
+.mini-layer .mini {
+  min-height: 100%;
 }
 
 /* The floating (always-on-top) player window is always dark, like the deck. */
@@ -86,7 +96,10 @@ body.floating-body {
 
 .mini-layer {
   position: fixed;
-  inset: 0;
+  top: 214px;
+  right: 0;
+  bottom: 0;
+  left: 0;
   z-index: 10;
   overflow: hidden;
   background: linear-gradient(180deg, #2b2b30 0%, #151518 100%);
