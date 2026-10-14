@@ -4,8 +4,8 @@
 // Version 2 (key "tapedeck:rack") wraps the tapes with a version number, adds
 // timestamps, and keeps a resume position per tape. Version 1 racks are migrated
 // automatically the first time the app loads. Later additions to version 2
-// (custom mixtapes, custom labels and shell colours) are new tape kinds or
-// optional fields, so older version 2 racks still decode as they are.
+// (custom mixtapes, custom labels and shell colours, offline folder tapes) are
+// new tape kinds or optional fields, so older version 2 racks still decode.
 import { SHELL_IDS, type LabelFont, type ShellId } from "./shells";
 import { createStoredValue, readStorage, removeStorage, writeStorage } from "./stored";
 import { isListId, isVideoId } from "./youtube";
@@ -34,7 +34,13 @@ export type PlaylistTape = TapeBase & { kind: "playlist" };
 export type Track = { id: string; title: string; author: string };
 /** A mixtape the listener built from single videos in their rack. */
 export type CustomMixtape = TapeBase & { kind: "custom"; tracks: Track[] };
-export type Tape = VideoTape | PlaylistTape | CustomMixtape;
+/**
+ * An offline tape: a folder of audio/video files on this computer. The folder
+ * itself is remembered in IndexedDB (lib/localFolder.ts); `count` is how many
+ * files it had when it was added.
+ */
+export type LocalTape = TapeBase & { kind: "local"; count: number };
+export type Tape = VideoTape | PlaylistTape | CustomMixtape | LocalTape;
 export type TapeKind = Tape["kind"];
 
 /**
@@ -53,6 +59,7 @@ const EMPTY_RACK: Rack = { version: RACK_VERSION, tapes: [], resume: {} };
 const MAX_TEXT = 300;
 const MAX_TRACKS = 500;
 const MIXTAPE_ID = /^m[a-z0-9]{6,24}$/;
+const LOCAL_ID = /^l[a-z0-9]{6,24}$/;
 export const MAX_NAME = 80;
 export const MAX_LABEL = 60;
 
@@ -112,6 +119,10 @@ export function decodeTape(value: unknown): Tape | undefined {
   if (v.kind === "custom" && MIXTAPE_ID.test(base.id)) {
     const tracks = decodeTracks(v.tracks);
     if (tracks) return { ...base, title: base.title.slice(0, MAX_NAME), kind: "custom", tracks };
+  }
+  if (v.kind === "local" && LOCAL_ID.test(base.id)) {
+    const count = nonNegative(v.count);
+    return { ...base, kind: "local", count: count !== undefined && Number.isInteger(count) ? count : 0 };
   }
   return undefined;
 }
@@ -231,9 +242,17 @@ export function withLook(rack: Rack, key: string, label: TapeLabel | undefined, 
 
 // --- Custom mixtapes ---------------------------------------------------------
 
-export function newMixtape(name: string): CustomMixtape {
+function randomId(prefix: string) {
   const bytes = crypto.getRandomValues(new Uint8Array(8));
-  const id = "m" + Array.from(bytes, (b) => (b % 36).toString(36)).join("");
+  return prefix + Array.from(bytes, (b) => (b % 36).toString(36)).join("");
+}
+
+export function newLocalTape(folderName: string, count: number): LocalTape {
+  return { kind: "local", id: randomId("l"), title: folderName.slice(0, MAX_NAME) || "Offline tape", author: "", addedAt: Date.now(), count };
+}
+
+export function newMixtape(name: string): CustomMixtape {
+  const id = randomId("m");
   return { kind: "custom", id, title: name.trim().slice(0, MAX_NAME) || "Untitled mixtape", author: "", addedAt: Date.now(), tracks: [] };
 }
 

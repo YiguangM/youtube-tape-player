@@ -13,6 +13,7 @@
 **Playing**
 
 - **Videos and playlists:** a playlist link records a *mixtape* that plays the whole playlist. Step through songs with the TRK buttons or Shift+N / Shift+P.
+- **Offline tapes:** **+ Offline folder** turns a folder of music or videos on your computer into a tape. See [Offline tapes](#offline-tapes).
 - **Resume where you stopped:** every tape remembers its position (and, on a mixtape, its track), saved every few seconds and whenever you pause, stop, eject, switch tapes or close the app. A tape left within 10 seconds of its end starts over.
 - **AUTO-REVERSE switch:** OFF, ONE (repeat the track) or ALL (repeat the tape or mixtape).
 - **SHUFFLE:** plays a mixtape's tracks in a random order without repeating any until all have played; PREV goes back through what actually played.
@@ -48,6 +49,24 @@
 | ![A playlist recorded as a mixtape, on track 4 of 18](docs/screenshots/mixtape.png) | ![The mini player: cassette, track title, speed, Prev / Stop / Next and the volume knob](docs/screenshots/mini-player.png) |
 
 ![Close-up of the deck controls](docs/screenshots/controls.png)
+
+## Offline tapes
+
+Play a folder of your own audio or video files, no internet needed (Chrome and Edge on desktop).
+
+1. Click **+ Offline folder** above the rack.
+2. Pick the folder in the dialog that opens. To go straight to a folder, paste its path (for example `C:UsersyouMusicRoad Trip`) into the dialog's address bar and press Enter, then click **Select Folder**.
+3. Chrome or Edge asks whether Tape Deck may view the folder's files. Choose **View files**.
+
+The folder becomes a tape marked **OFFLINE**, with one track per file:
+
+- **Files:** MP3, M4A, AAC, WAV, FLAC, OGG, Opus, MP4, M4V, WebM and MOV, in name order with numbers sorted naturally (`2` before `10`). Leading track numbers are dropped from titles, so `03 - My_Song.mp3` shows as *My Song*. Subfolders aren't included.
+- **Cover art:** an image named `cover`, `folder`, `front` or `album` (JPG, PNG or WebP) shows on the screen while audio plays, and in the system media controls.
+- **Everything works the same as on a mixtape:** resume, AUTO-REVERSE, SHUFFLE, speed, volume, the counter, A–B repeat, the sleep timer and both mini players. Files the browser can't play are skipped with a notice.
+- **Media keys work fully:** Play/Pause, Next and Previous from the keyboard or the Windows media flyout all reach the deck, and the flyout shows the track and folder name.
+- **After restarting the browser**, it may ask again for permission to view the folder when you insert the tape. If you move or rename the folder, remove the tape and add the folder again. Adding or removing files is fine: the tape reads the folder each time it's inserted.
+
+Your files are played straight from disk. They're never uploaded or copied.
 
 ## Keyboard shortcuts
 
@@ -101,7 +120,7 @@ The app includes a web app manifest. In Chrome or Edge, use the install button i
 
 ## Your data
 
-Everything stays in your browser's local storage; there are no accounts and no server-side storage. The rack uses a versioned schema (version 2, key `tapedeck:rack`). Racks saved by earlier versions of Tape Deck are migrated automatically, and if saved data can't be read it's kept in `tapedeck:rack-unreadable` instead of being overwritten. Settings (volume, speed, repeat, shuffle, sorting, sound effects) are stored separately. Use **Export** to keep a copy or move your rack to another browser.
+Everything stays in your browser's local storage; there are no accounts and no server-side storage. The rack uses a versioned schema (version 2, key `tapedeck:rack`). Racks saved by earlier versions of Tape Deck are migrated automatically, and if saved data can't be read it's kept in `tapedeck:rack-unreadable` instead of being overwritten. Settings (volume, speed, repeat, shuffle, sorting, sound effects) are stored separately. Offline tapes keep their folder access in the browser's IndexedDB (database `tapedeck`). Removing an offline tape deletes it. Use **Export** to keep a copy or move your rack to another browser. Offline tapes point to folders on your computer, so they're left out of exports (the notice says how many).
 
 ## Develop
 
@@ -127,6 +146,7 @@ Then open [http://localhost:3000](http://localhost:3000).
 - `src/components/VolumeKnob.tsx`, `SleepDial.tsx`, `TapeCounter.tsx`, `controls.tsx`: deck controls
 - `src/components/MixtapeDialogs.tsx`, `TapeLookDialog.tsx`, `RackImportDialog.tsx`, `Dialog.tsx`: dialogs
 - `src/lib/rackStore.ts`: the versioned rack schema, migration and rack updates
+- `src/lib/localFolder.ts`, `localPlayer.ts`: offline tapes: reading and remembering folders, and playing their files behind the same interface as the YouTube player
 - `src/lib/sequencer.ts`: mixtape track order (shuffle, repeat, play history)
 - `src/lib/settings.ts`, `stored.ts`: remembered settings and safe localStorage access
 - `src/lib/mediaSession.ts`, `sleepTimer.ts`, `sfx.ts`, `shells.ts`, `rackFile.ts`, `shareLink.ts`: one feature each
@@ -137,11 +157,12 @@ Then open [http://localhost:3000](http://localhost:3000).
 
 ## Known limitations
 
-- **Media keys and the Windows media flyout:** Tape Deck publishes what's playing and handles the media keys through the Media Session API, but in Chrome and Edge the YouTube player (which runs in its own iframe) registers a media session too, and the browser sends the system media controls to YouTube's. In practice: **Play/Pause works** (YouTube pauses and the deck follows), but **Next/Previous from the keyboard or the flyout don't change tracks or tapes**, and the flyout shows YouTube's title and artwork. Tested with Chrome and Edge on Windows. The deck's handlers stay in place for browsers that route media keys to the page.
+- **Media keys and the Windows media flyout:** Tape Deck publishes what's playing and handles the media keys through the Media Session API, but in Chrome and Edge the YouTube player (which runs in its own iframe) registers a media session too, and the browser sends the system media controls to YouTube's. In practice: **Play/Pause works** (YouTube pauses and the deck follows), but **Next/Previous from the keyboard or the flyout don't change tracks or tapes**, and the flyout shows YouTube's title and artwork. Tested with Chrome and Edge on Windows. The deck's handlers stay in place for browsers that route media keys to the page. Offline tapes don't have this problem, since no YouTube player is involved.
 - **The always-on-top window is controls only.** The video plays in the main Tape Deck window, which has to stay open (it can be behind other windows).
 - **Share links point to where Tape Deck is running.** From the desktop icon that's `localhost`, so the links only work on your own computer until the app is deployed to a public address.
 - **YouTube limits:** Mixes (auto-generated playlists) can't be played outside YouTube; very long playlists may be cut short, since a mixtape uses the video list YouTube's embedded player provides; videos whose owners don't allow embedding are skipped.
 - **The sleep timer** isn't remembered if you reload the page.
+- **Offline tapes need Chrome or Edge on a computer.** Other browsers don't have the folder picker, so **+ Offline folder** isn't shown there. Which formats play depends on the browser: a file whose codec it can't decode (some MOV and M4A files, for example) is skipped.
 
 ## Credits
 

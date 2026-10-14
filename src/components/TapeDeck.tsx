@@ -26,6 +26,8 @@ import {
   needsRecentring,
   type WindowBounds,
 } from "@/lib/appWindow";
+import { forgetFolder, openFolderTape } from "@/lib/localFolder";
+import { LOCAL_FILE_MISSING, LOCAL_FILE_UNPLAYABLE, LocalPlayer } from "@/lib/localPlayer";
 import { useMediaSession } from "@/lib/mediaSession";
 import { openFloatingWindow, useFloatingWindowSupported } from "@/lib/pip";
 import {
@@ -64,6 +66,8 @@ type Track = { index: number; count: number; title: string };
 type Mix = { ids: string[]; titles: Record<number, string>; authors: Record<number, string>; sequence: Sequence };
 
 const PLAYER_ERRORS: Record<number, string> = {
+  [LOCAL_FILE_MISSING]: "That file is missing from the folder.",
+  [LOCAL_FILE_UNPLAYABLE]: "This browser can't play that file's format.",
   2: "That video ID isn't valid.",
   5: "This video can't play in this browser.",
   100: "Video not found. It may be private or removed.",
@@ -179,7 +183,7 @@ export function TapeDeck() {
   const markedPlayed = useRef(0);
   // YouTube ignores a pause while a video is still starting, so STOP pressed just
   // after PLAY is re-applied when playback actually begins.
-  const stopRequestedAt = useRef(0);
+  const stopRequestedAt = useRef(Number.NEGATIVE_INFINITY); // no STOP pending
 
   const track: Track | null = mix
     ? {
@@ -210,6 +214,11 @@ export function TapeDeck() {
 
   const tape = slot?.tape ?? null;
   const hasTape = slot !== null;
+  // Which player plays the tape: YouTube's, or the offline one for a local folder.
+  const engineOf = (t: Tape | null) => (!t ? null : t.kind === "local" ? `local:${t.id}` : "youtube");
+  const engine = engineOf(tape);
+  // The offline folder's cover image, for the OS media controls.
+  const [localArtwork, setLocalArtwork] = useState<string | null>(null);
   // The tape as it is in the rack now, so label and shell edits show straight away.
   const liveTape = tape ? (tapes.find((t) => tapeKey(t) === tapeKey(tape)) ?? tape) : null;
   const cassetteLook = liveTape
@@ -248,6 +257,7 @@ export function TapeDeck() {
 
   function load(next: Tape, autoplay: boolean) {
     saveResume(); // remember where the outgoing tape was left
+    if (engineOf(next) !== engine) setPlayerReady(false); // a different player gets built
     setSlot({ tape: next, autoplay, insertedAt: Date.now(), start: resumePoint(rack, tapeKey(next)) });
     setStatus("loading");
     setStopped(!autoplay);
@@ -271,6 +281,24 @@ export function TapeDeck() {
       // the deck then plays them one by one so it controls the order.
       resolvingPlaylist.current = true;
       player.cuePlaylist({ list: loaded.tape.id, listType: "playlist", index: 0 });
+    } else if (loaded.tape.kind === "local") {
+      // An offline tape: the folder's files, in name order, sequenced like a mixtape.
+      const files = player.getTrackList?.() ?? [];
+      if (files.length !== loaded.tape.count) {
+        // Files were added or removed since the folder was added: keep the rack's count right.
+        updateRack((r) => withUpdatedTape(r, tapeKey(loaded.tape), (t) => (t.kind === "local" ? { ...t, count: files.length } : t)));
+      }
+      const first = Math.min(loaded.start.track, Math.max(0, files.length - 1));
+      playTrack(
+        {
+          ids: files.map((t) => t.id),
+          titles: Object.fromEntries(files.map((t, i) => [i, t.title])),
+          authors: {},
+          sequence: startSequence(files.length, first, shuffle),
+        },
+        loaded.autoplay,
+        first === loaded.start.track ? loaded.start.seconds : 0,
+      );
     } else if (loaded.tape.kind === "custom") {
       // A custom mixtape already knows its videos and titles.
       const tracks = loaded.tape.tracks;
@@ -353,6 +381,7 @@ export function TapeDeck() {
   const onPlayerReady = useEffectEvent((player: YTPlayer) => {
     playerRef.current = player;
     setPlayerReady(true);
+    setLocalArtwork(player.getArtworkUrl?.() ?? null);
     player.setVolume(volume);
     requestRate(player, speed);
     if (slot) loadSlot(player, slot);
@@ -362,7 +391,7 @@ export function TapeDeck() {
     switch (state) {
       case PlayerState.PLAYING: {
         if (performance.now() - stopRequestedAt.current < 2000) {
-          stopRequestedAt.current = 0;
+          stopRequestedAt.current = Number.NEGATIVE_INFINITY;
           playerRef.current?.pauseVideo();
           break;
         }
@@ -390,7 +419,7 @@ export function TapeDeck() {
         // STOP while YouTube was still starting the video sends it back to
         // "not started" rather than "paused": that's stopped too.
         if (performance.now() - stopRequestedAt.current < 2000) {
-          stopRequestedAt.current = 0;
+          stopRequestedAt.current = Number.NEGATIVE_INFINITY;
           setStatus("paused");
           setStopped(true);
         }
@@ -453,34 +482,45 @@ export function TapeDeck() {
     setDeckMessage(error.message);
   });
 
-  // Build the YouTube player when a tape goes in; tear it down on eject.
+  // Build the player when a tape goes in (YouTube's, or the offline one for a
+  // local folder); tear it down on eject or when the other kind is needed.
   useEffect(() => {
     const screen = screenRef.current;
-    if (!hasTape || !screen) return;
+    if (!engine || !screen) return;
 
     let cancelled = false;
     let player: YTPlayer | null = null;
+    const events = {
+      onReady: (e: { target: YTPlayer }) => !cancelled && onPlayerReady(e.target),
+      onStateChange: (e: { data: number }) => !cancelled && onPlayerState(e.data),
+      onError: (e: { data: number }) => !cancelled && onPlayerError(e.data),
+      onPlaybackRateChange: (e: { data: number }) => !cancelled && onRateChange(e.data),
+    };
 
-    loadYouTubeApi().then(
-      (YT) => {
+    if (engine.startsWith("local:")) {
+      // Reopening the folder may show the browser's permission prompt.
+      void openFolderTape(engine.slice("local:".length)).then((opened) => {
         if (cancelled) return;
-        // YouTube replaces this element with its iframe, so keep it out of React's tree.
-        const mount = document.createElement("div");
-        screen.replaceChildren(mount);
-        player = new YT.Player(mount, {
-          width: "100%",
-          height: "100%",
-          playerVars: { playsinline: 1, rel: 0, origin: window.location.origin },
-          events: {
-            onReady: (e) => !cancelled && onPlayerReady(e.target),
-            onStateChange: (e) => !cancelled && onPlayerState(e.data),
-            onError: (e) => !cancelled && onPlayerError(e.data),
-            onPlaybackRateChange: (e) => !cancelled && onRateChange(e.data),
-          },
-        });
-      },
-      (error: Error) => !cancelled && onApiFailed(error),
-    );
+        if (!opened.ok) onApiFailed(new Error(opened.error));
+        else player = new LocalPlayer(screen, opened.tracks, opened.cover, events);
+      });
+    } else {
+      loadYouTubeApi().then(
+        (YT) => {
+          if (cancelled) return;
+          // YouTube replaces this element with its iframe, so keep it out of React's tree.
+          const mount = document.createElement("div");
+          screen.replaceChildren(mount);
+          player = new YT.Player(mount, {
+            width: "100%",
+            height: "100%",
+            playerVars: { playsinline: 1, rel: 0, origin: window.location.origin },
+            events,
+          });
+        },
+        (error: Error) => !cancelled && onApiFailed(error),
+      );
+    }
 
     return () => {
       cancelled = true;
@@ -488,7 +528,7 @@ export function TapeDeck() {
       player?.destroy();
       screen.replaceChildren();
     };
-  }, [hasTape]);
+  }, [engine]);
 
   // Swap tapes on an existing player. (A brand-new player loads the tape in onPlayerReady.)
   const onSlotChange = useEffectEvent(() => {
@@ -602,7 +642,7 @@ export function TapeDeck() {
     const player = playerRef.current;
     if (!player) return;
     keyClick();
-    stopRequestedAt.current = 0;
+    stopRequestedAt.current = Number.NEGATIVE_INFINITY;
     setStopped(false);
     player.playVideo();
   }
@@ -636,7 +676,7 @@ export function TapeDeck() {
 
   // When the track was last restarted. YouTube reports the new position a moment
   // late, so a quick second PREV would otherwise just restart the track again.
-  const restartedAt = useRef(0);
+  const restartedAt = useRef(Number.NEGATIVE_INFINITY); // not restarted yet
 
   function restartCurrent() {
     const player = playerRef.current;
@@ -905,6 +945,7 @@ export function TapeDeck() {
   }
 
   function removeTape(removed: Tape) {
+    if (removed.kind === "local") void forgetFolder(removed.id);
     updateRack((r) => withoutTape(r, tapeKey(removed)));
   }
 
@@ -913,8 +954,9 @@ export function TapeDeck() {
   const progress = duration > 0 ? Math.min(time / duration, 1) : 0;
   // On a mixtape the reels show how far through the whole playlist you are.
   const reelProgress = track ? Math.min((track.index + progress) / track.count, 1) : progress;
-  const isMixtape = tape?.kind === "playlist" || tape?.kind === "custom";
-  const cassetteNote = isMixtape ? (track ? `MIXTAPE · ${track.count} TRACKS` : "MIXTAPE") : undefined;
+  const isMixtape = tape?.kind === "playlist" || tape?.kind === "custom" || tape?.kind === "local";
+  const tapeType = tape?.kind === "local" ? "OFFLINE" : "MIXTAPE";
+  const cassetteNote = isMixtape ? (track ? `${tapeType} · ${track.count} TRACKS` : tapeType) : undefined;
   const motion = wind ? wind.dir * 12 : status === "playing" ? speed : 0;
   const playLatched = playing || (status === "paused" && !stopped);
   const pauseLatched = status === "paused" && !stopped;
@@ -965,14 +1007,20 @@ export function TapeDeck() {
   };
 
   // The operating system's media controls and hardware media keys.
-  const currentVideo = mix ? mix.ids[currentTrack(mix.sequence)] : tape?.kind === "video" ? tape.id : undefined;
+  // The YouTube video playing, if any (offline tapes have files, not videos).
+  const currentVideo =
+    tape?.kind === "local" ? undefined : mix ? mix.ids[currentTrack(mix.sequence)] : tape?.kind === "video" ? tape.id : undefined;
   useMediaSession({
     info: tape
       ? {
           title: track?.title || tape.title,
           artist: tape.author,
           album: isMixtape ? tape.title : "Tape Deck",
-          artwork: currentVideo ? `https://i.ytimg.com/vi/${currentVideo}/hqdefault.jpg` : undefined,
+          artwork: currentVideo
+            ? `https://i.ytimg.com/vi/${currentVideo}/hqdefault.jpg`
+            : tape.kind === "local"
+              ? (localArtwork ?? undefined)
+              : undefined,
         }
       : null,
     state: playing ? "playing" : slot ? "paused" : "none",

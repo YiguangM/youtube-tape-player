@@ -3,11 +3,19 @@ import { decodeRack, RACK_VERSION, tapeKey, type Rack } from "./rackStore";
 
 export const MAX_IMPORT_BYTES = 2_000_000;
 
-/** The file contents and name for "Export rack". */
-export function exportRack(rack: Rack, now = new Date()): { name: string; text: string } {
+/** Offline tapes point to folders on this computer, so they stay out of exports. */
+const portable = (rack: Rack): Rack => {
+  const tapes = rack.tapes.filter((t) => t.kind !== "local");
+  const keys = new Set(tapes.map(tapeKey));
+  return { ...rack, tapes, resume: Object.fromEntries(Object.entries(rack.resume).filter(([key]) => keys.has(key))) };
+};
+
+/** The file contents and name for "Export rack" (offline tapes left out, see `left`). */
+export function exportRack(rack: Rack, now = new Date()): { name: string; text: string; left: number } {
   const date = [now.getFullYear(), now.getMonth() + 1, now.getDate()].map((n) => String(n).padStart(2, "0")).join("-");
-  const file = { app: "Tape Deck", version: RACK_VERSION, exportedAt: now.toISOString(), tapes: rack.tapes, resume: rack.resume };
-  return { name: `tape-deck-rack-${date}.json`, text: JSON.stringify(file, null, 2) };
+  const kept = portable(rack);
+  const file = { app: "Tape Deck", version: RACK_VERSION, exportedAt: now.toISOString(), tapes: kept.tapes, resume: kept.resume };
+  return { name: `tape-deck-rack-${date}.json`, text: JSON.stringify(file, null, 2), left: rack.tapes.length - kept.tapes.length };
 }
 
 export type ImportCheck =
@@ -36,8 +44,9 @@ export function checkRackFile(text: string, bytes: number): ImportCheck {
   if (version !== RACK_VERSION) {
     return { ok: false, error: `That rack was saved by a different version of Tape Deck (schema ${String(version)}, expected ${RACK_VERSION}).` };
   }
-  const rack = decodeRack(parsed);
-  if (!rack) return { ok: false, error: "That file doesn't contain a Tape Deck rack." };
+  const decoded = decodeRack(parsed);
+  if (!decoded) return { ok: false, error: "That file doesn't contain a Tape Deck rack." };
+  const rack = portable(decoded); // an offline tape from another computer has no folder here
   const total = (parsed as { tapes: unknown[] }).tapes.length;
   return { ok: true, rack, skipped: total - rack.tapes.length };
 }

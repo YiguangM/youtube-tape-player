@@ -15,6 +15,9 @@ export interface YTPlayer {
   getPlaylistIndex(): number;
   /** Undocumented but long-standing; used only to show the current track title. */
   getVideoData?(): { title?: string; author?: string; video_id?: string };
+  /** Offline (local folder) player only: its tracks, and the folder's cover image. */
+  getTrackList?(): { id: string; title: string }[];
+  getArtworkUrl?(): string | null;
   setPlaybackRate(rate: number): void;
   getPlaybackRate(): number;
   /** Speeds the current video allows; just [1] for live streams. */
@@ -37,12 +40,12 @@ interface YTPlaylistRequest {
   startSeconds?: number;
 }
 
-interface YTPlayerEvent {
+export interface YTPlayerEvent {
   target: YTPlayer;
   data: number;
 }
 
-interface YTPlayerOptions {
+export interface YTPlayerOptions {
   width?: string | number;
   height?: string | number;
   videoId?: string;

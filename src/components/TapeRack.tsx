@@ -8,6 +8,7 @@ import { RackImportDialog } from "./RackImportDialog";
 import { TapeLookDialog } from "./TapeLookDialog";
 import {
   labelText,
+  newLocalTape,
   newMixtape,
   RACK_TOOLS_AFTER,
   rackOrder,
@@ -22,6 +23,7 @@ import {
   type Tape,
   type Track,
 } from "@/lib/rackStore";
+import { pickFolder, readFolder, rememberFolder, useFolderPickerSupported } from "@/lib/localFolder";
 import { checkRackFile, downloadText, exportRack, mergeRacks, MAX_IMPORT_BYTES } from "@/lib/rackFile";
 import { useRackSort } from "@/lib/settings";
 import { clearLocationHash, mixtapeShareLink, readSharedMixtape, useLocationHash, type SharedMixtape } from "@/lib/shareLink";
@@ -125,6 +127,32 @@ export function TapeRack({ rack, activeKey, onInsert, onAdd, onRemove, onUpdateR
     notify(`Added ${created.title} (${tracks.length} ${tracks.length === 1 ? "track" : "tracks"})`);
   }
 
+  // Offline tapes: a folder of audio/video files on this computer.
+  const canPickFolders = useFolderPickerSupported();
+
+  async function addFolder() {
+    const folder = await pickFolder();
+    if (!folder) return; // cancelled
+    let count = 0;
+    try {
+      count = (await readFolder(folder)).tracks.length;
+    } catch {
+      notify("Couldn't read that folder.", 8000);
+      return;
+    }
+    if (count === 0) {
+      notify(`No audio or video files in "${folder.name}". Pick the folder that holds the songs themselves.`, 8000);
+      return;
+    }
+    const tape = newLocalTape(folder.name, count);
+    if (!(await rememberFolder(tape.id, folder))) {
+      notify("This browser can't remember folders (storage is blocked), so offline tapes won't work here.", 8000);
+      return;
+    }
+    onAdd(tape, deckEmpty);
+    notify(`Added "${tape.title}" (${count} ${count === 1 ? "file" : "files"})`);
+  }
+
   async function importFile(file: File) {
     if (file.size > MAX_IMPORT_BYTES) {
       notify("That file is too big to be a Tape Deck rack.", 8000);
@@ -204,6 +232,16 @@ export function TapeRack({ rack, activeKey, onInsert, onAdd, onRemove, onUpdateR
           <button type="button" className="btn-secondary h-9 px-3 text-sm" onClick={() => setDialog({ type: "new" })}>
             + New mixtape
           </button>
+          {canPickFolders && (
+            <button
+              type="button"
+              className="btn-secondary h-9 px-3 text-sm"
+              title="Play a folder of audio or video files from this computer (you can paste its path into the folder dialog)"
+              onClick={() => void addFolder()}
+            >
+              + Offline folder
+            </button>
+          )}
           <button
             type="button"
             className="btn-secondary h-9 px-3 text-sm"
@@ -212,7 +250,11 @@ export function TapeRack({ rack, activeKey, onInsert, onAdd, onRemove, onUpdateR
             onClick={() => {
               const file = exportRack(rack);
               downloadText(file.name, file.text);
-              notify(`Exported ${tapes.length} ${tapes.length === 1 ? "tape" : "tapes"}`);
+              const n = tapes.length - file.left;
+              notify(
+                `Exported ${n} ${n === 1 ? "tape" : "tapes"}` +
+                  (file.left ? ` (${file.left} offline ${file.left === 1 ? "tape stays" : "tapes stay"} on this computer)` : ""),
+              );
             }}
           >
             Export
@@ -373,10 +415,14 @@ export function TapeRack({ rack, activeKey, onInsert, onAdd, onRemove, onUpdateR
                       {labelText(t)}
                     </span>
                     <span className="spine-author">
-                      {t.kind !== "video" && <span className="spine-mix">{t.kind === "custom" ? "MY MIX" : "MIXTAPE"}</span>}
+                      {t.kind !== "video" && (
+                        <span className="spine-mix">{{ custom: "MY MIX", playlist: "MIXTAPE", local: "OFFLINE" }[t.kind]}</span>
+                      )}
                       {t.kind === "custom"
                         ? `${t.tracks.length} ${t.tracks.length === 1 ? "track" : "tracks"}`
-                        : t.author || "Unknown artist"}
+                        : t.kind === "local"
+                          ? `${t.count} ${t.count === 1 ? "file" : "files"} on this computer`
+                          : t.author || "Unknown artist"}
                     </span>
                   </span>
                   {inDeck && <span className="spine-badge">IN DECK</span>}
