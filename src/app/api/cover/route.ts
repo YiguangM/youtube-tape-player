@@ -1,4 +1,5 @@
 import type { NextRequest } from "next/server";
+import { attachment, safeFileName, titleWithChannel } from "@/lib/fileName";
 import { isVideoId } from "@/lib/youtube";
 
 // Downloads a video's thumbnail ("cover art") with a readable file name:
@@ -8,20 +9,6 @@ import { isVideoId } from "@/lib/youtube";
 
 // Largest first; YouTube answers 404 for sizes a video doesn't have.
 const SIZES = ["maxresdefault", "sddefault", "hqdefault", "mqdefault"];
-const MAX_NAME_LENGTH = 150;
-const WINDOWS_RESERVED = /^(con|prn|aux|nul|com\d|lpt\d)$/i;
-
-/** Makes a name safe as a file name on Windows, macOS and Linux. */
-function safeFileName(raw: string): string {
-  const cleaned = raw
-    .replace(/[\u0000-\u001f\u007f<>:"/\\|?*]/g, " ") // control and reserved characters
-    .replace(/\s+/g, " ")
-    .trim()
-    .replace(/[. ]+$/, "") // Windows drops trailing dots and spaces
-    .slice(0, MAX_NAME_LENGTH)
-    .trim();
-  return WINDOWS_RESERVED.test(cleaned) ? `${cleaned}_` : cleaned;
-}
 
 export async function GET(request: NextRequest) {
   const params = request.nextUrl.searchParams;
@@ -48,14 +35,12 @@ export async function GET(request: NextRequest) {
 
   const title = (params.get("title") ?? "").slice(0, 300);
   const author = (params.get("author") ?? "").slice(0, 300);
-  const name = safeFileName(author && !title.includes(author) ? `${title} - ${author}` : title) || id;
-  // ASCII-only fallback for old clients, plus the full UTF-8 name (RFC 6266).
-  const asciiName = name.replace(/[^\x20-\x7e]/g, "_");
+  const name = safeFileName(titleWithChannel(title, author)) || id;
 
   return new Response(image.body, {
     headers: {
       "Content-Type": "image/jpeg",
-      "Content-Disposition": `attachment; filename="${asciiName}.jpg"; filename*=UTF-8''${encodeURIComponent(`${name}.jpg`)}`,
+      "Content-Disposition": attachment(`${name}.jpg`),
       "Cache-Control": "no-store",
     },
   });
