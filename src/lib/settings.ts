@@ -1,4 +1,5 @@
 // Deck settings that are remembered between visits.
+import { isAudioFormat, type AudioFormat } from "./audioFormats";
 import type { RackSort } from "./rackStore";
 import type { Repeat } from "./sequencer";
 import { createStoredValue } from "./stored";
@@ -22,4 +23,9 @@ export const useSoundFx = createStoredValue("tapedeck:sound-fx", false, boolean)
 
 export const useRackSort = createStoredValue<RackSort>("tapedeck:rack-sort", "added", (value) =>
   value === "added" || value === "played" || value === "title" ? value : undefined,
+);
+
+/** The format "Save audio" last used. */
+export const useAudioFormat = createStoredValue<AudioFormat>("tapedeck:audio-format", "mp3", (value) =>
+  isAudioFormat(value) ? value : undefined,
 );

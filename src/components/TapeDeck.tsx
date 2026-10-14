@@ -12,6 +12,7 @@ import { createPortal } from "react-dom";
 import { Cassette } from "./Cassette";
 import { ICONS, Key, SlideSwitch, SPEEDS, SpeedSelector } from "./controls";
 import { MiniPlayer } from "./MiniPlayer";
+import { SaveAudio } from "./SaveAudio";
 import { TapeRack } from "./TapeRack";
 import { SleepDial } from "./SleepDial";
 import { TapeCounter } from "./TapeCounter";
@@ -26,11 +27,12 @@ import {
   needsRecentring,
   type WindowBounds,
 } from "@/lib/appWindow";
-import { forgetFolder, openFolderTape } from "@/lib/localFolder";
+import { forgetFolder, openFolderTape, rememberFolder } from "@/lib/localFolder";
 import { LOCAL_FILE_MISSING, LOCAL_FILE_UNPLAYABLE, LocalPlayer } from "@/lib/localPlayer";
 import { useMediaSession } from "@/lib/mediaSession";
 import { openFloatingWindow, useFloatingWindowSupported } from "@/lib/pip";
 import {
+  newLocalTape,
   rackOrder,
   resumePoint,
   tapeKey,
@@ -949,6 +951,17 @@ export function TapeDeck() {
     updateRack((r) => withoutTape(r, tapeKey(removed)));
   }
 
+  /** A mixtape saved as audio files: its folder goes in the rack as an offline tape. */
+  async function addSavedFolder(folder: FileSystemDirectoryHandle, count: number) {
+    const added = newLocalTape(folder.name, count);
+    if (!(await rememberFolder(added.id, folder))) {
+      showNotice("This browser can't remember folders, so the offline tape wasn't added.");
+      return;
+    }
+    addTape(added, false);
+    showNotice(`Added "${added.title}" to the rack as an offline tape`);
+  }
+
   // --- Display ----------------------------------------------------------------
 
   const progress = duration > 0 ? Math.min(time / duration, 1) : 0;
@@ -1075,6 +1088,24 @@ export function TapeDeck() {
                   COVER
                 </a>
               )}
+              <SaveAudio
+                current={
+                  currentVideo
+                    ? {
+                        id: currentVideo,
+                        title: track?.title || tape?.title || "",
+                        author: (mix && mix.authors[track?.index ?? -1]) || tape?.author || "",
+                      }
+                    : null
+                }
+                mixtape={
+                  mix && tape && (tape.kind === "playlist" || tape.kind === "custom")
+                    ? { name: liveTape?.title ?? tape.title, tracks: mix.ids.map((id, i) => ({ id, title: mix.titles[i] })) }
+                    : null
+                }
+                onNotice={showNotice}
+                onAddOfflineTape={(folder, count) => void addSavedFolder(folder, count)}
+              />
               <button
                 type="button"
                 className="plate-btn"

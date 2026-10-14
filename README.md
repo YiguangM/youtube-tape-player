@@ -36,6 +36,7 @@
 - **Search and sort:** once the rack holds more than 8 tapes, filter by title and sort by recently added, recently played, or title.
 - **Export and import:** save the whole rack (tapes, mixtapes, labels, shells and resume positions) as a JSON file, then load it back with **Merge** (skip duplicates) or **Replace** (asks first).
 - **Cover art:** save a video's thumbnail as `Title - Channel.jpg` from the rack or with the deck's COVER button.
+- **Save audio (MP3):** the deck's **MP3** button saves what's playing as an MP3, M4A or Opus file with its title, channel and cover art, or saves a whole mixtape into a folder you can then play as an offline tape. See [Saving audio](#saving-audio).
 
 **Mini player**
 
@@ -55,7 +56,7 @@
 Play a folder of your own audio or video files, no internet needed (Chrome and Edge on desktop).
 
 1. Click **+ Offline folder** above the rack.
-2. Pick the folder in the dialog that opens. To go straight to a folder, paste its path (for example `C:UsersyouMusicRoad Trip`) into the dialog's address bar and press Enter, then click **Select Folder**.
+2. Pick the folder in the dialog that opens. To go straight to a folder, paste its path (for example `C:\Users\you\Music\Road Trip`) into the dialog's address bar and press Enter, then click **Select Folder**.
 3. Chrome or Edge asks whether Tape Deck may view the folder's files. Choose **View files**.
 
 The folder becomes a tape marked **OFFLINE**, with one track per file:
@@ -67,6 +68,37 @@ The folder becomes a tape marked **OFFLINE**, with one track per file:
 - **After restarting the browser**, it may ask again for permission to view the folder when you insert the tape. If you move or rename the folder, remove the tape and add the folder again. Adding or removing files is fine: the tape reads the folder each time it's inserted.
 
 Your files are played straight from disk. They're never uploaded or copied.
+
+## Saving audio
+
+The **MP3** button on the deck saves the audio of what's playing as a file. It needs two free tools on your computer, [yt-dlp](https://github.com/yt-dlp/yt-dlp) and [FFmpeg](https://ffmpeg.org). On Windows, install both once from PowerShell:
+
+```powershell
+winget install yt-dlp.yt-dlp
+```
+
+(This also installs FFmpeg and Deno, which yt-dlp uses. On a Mac: `brew install yt-dlp ffmpeg deno`.) Tape Deck finds them without a restart. If they're missing, the MP3 button shows these instructions.
+
+1. Insert a YouTube tape and click **MP3**.
+2. Pick a format. Tape Deck remembers your choice.
+3. Click **Save…** and choose where to save the file. The suggested name is `Title - Channel.mp3`.
+4. Progress shows on the deck's top panel while it downloads and converts. The **×** stops it. A song usually takes 5 to 15 seconds.
+
+| Format | What you get |
+| --- | --- |
+| MP3 | Plays on everything. Variable bitrate, about 245 kb/s |
+| M4A (AAC) | Smaller files, made for Apple devices. 192 kb/s |
+| Opus | Smallest. YouTube's own audio stream, copied without re-encoding |
+
+Every file gets the video's title and channel as tags, and its thumbnail as embedded cover art.
+
+**A whole mixtape:** on a mixtape, choose **The whole mixtape** and pick a folder (Chrome and Edge). Tape Deck makes a folder named after the mixtape inside it, with the tracks numbered in order (`01 - Title.mp3`, `02 - …`) and the first track's thumbnail as `cover.jpg`. Tracks that can't be saved, such as removed or private videos, are skipped and listed at the end. Choose **Add as offline tape** to put the folder in your rack and play it without the internet.
+
+How it works: the same way as [YoutubeToMP3](https://github.com/PackJC/YoutubeToMP3). It downloads the video's audio stream, then FFmpeg converts it and adds the tags. The download goes through yt-dlp, which keeps up with YouTube's changes. Everything runs on your computer. Temporary files go in your temp folder (`tapedeck-audio`) and are deleted once the file is saved.
+
+Keep yt-dlp up to date (`winget upgrade yt-dlp.yt-dlp`). YouTube changes often, and an old yt-dlp eventually stops working.
+
+Downloading from YouTube is against YouTube's Terms of Service except where YouTube offers a download button. Only save videos you have the right to keep, such as your own uploads or music shared under a Creative Commons licence.
 
 ## Keyboard shortcuts
 
@@ -102,6 +134,8 @@ cd youtube-tape-player
 npm install
 ```
 
+To use the MP3 button, also install yt-dlp and FFmpeg (see [Saving audio](#saving-audio)).
+
 ### Open it with one click (Windows)
 
 Run this once to add a **Tape Deck** icon to your Desktop and Start menu:
@@ -120,7 +154,7 @@ The app includes a web app manifest. In Chrome or Edge, use the install button i
 
 ## Your data
 
-Everything stays in your browser's local storage; there are no accounts and no server-side storage. The rack uses a versioned schema (version 2, key `tapedeck:rack`). Racks saved by earlier versions of Tape Deck are migrated automatically, and if saved data can't be read it's kept in `tapedeck:rack-unreadable` instead of being overwritten. Settings (volume, speed, repeat, shuffle, sorting, sound effects) are stored separately. Offline tapes keep their folder access in the browser's IndexedDB (database `tapedeck`). Removing an offline tape deletes it. Use **Export** to keep a copy or move your rack to another browser. Offline tapes point to folders on your computer, so they're left out of exports (the notice says how many).
+Everything stays in your browser's local storage; there are no accounts and no server-side storage. The rack uses a versioned schema (version 2, key `tapedeck:rack`). Racks saved by earlier versions of Tape Deck are migrated automatically, and if saved data can't be read it's kept in `tapedeck:rack-unreadable` instead of being overwritten. Settings (volume, speed, repeat, shuffle, sorting, sound effects) are stored separately. Offline tapes keep their folder access in the browser's IndexedDB (database `tapedeck`). Removing an offline tape deletes it. Use **Export** to keep a copy or move your rack to another browser. Offline tapes point to folders on your computer, so they're left out of exports (the notice says how many). Saved audio files go only where you choose to save them.
 
 ## Develop
 
@@ -152,6 +186,9 @@ Then open [http://localhost:3000](http://localhost:3000).
 - `src/lib/mediaSession.ts`, `sleepTimer.ts`, `sfx.ts`, `shells.ts`, `rackFile.ts`, `shareLink.ts`: one feature each
 - `src/app/api/tape/route.ts`: looks up a video's or playlist's title and checks it can be embedded
 - `src/app/api/cover/route.ts`: serves a video's thumbnail as a named download
+- `src/components/SaveAudio.tsx`, `src/lib/audioSave.ts`: the MP3 button, its dialogs and progress, and writing the saved files
+- `src/app/api/audio/route.ts`, `src/lib/ytDlp.ts`: converting a video's audio with yt-dlp and FFmpeg (only for requests from this computer)
+- `src/lib/audioFormats.ts`, `fileName.ts`: the audio formats, and safe file names for everything Tape Deck saves
 - `src/app/manifest.ts`, `src/app/icon.svg`, `public/icons/`: app name and icons
 - `launcher/`: the Windows launcher and shortcut installer
 
@@ -162,8 +199,11 @@ Then open [http://localhost:3000](http://localhost:3000).
 - **Share links point to where Tape Deck is running.** From the desktop icon that's `localhost`, so the links only work on your own computer until the app is deployed to a public address.
 - **YouTube limits:** Mixes (auto-generated playlists) can't be played outside YouTube; very long playlists may be cut short, since a mixtape uses the video list YouTube's embedded player provides; videos whose owners don't allow embedding are skipped.
 - **The sleep timer** isn't remembered if you reload the page.
+- **Saving audio** only works when Tape Deck runs on your own computer: on a copy deployed to a public address, the MP3 button is hidden. Live streams, videos over 3 hours, and age-restricted or members-only videos can't be saved. When YouTube refuses a download, Tape Deck tries twice more before giving up. Saving a whole mixtape needs Chrome or Edge. In other browsers, single tracks go to your Downloads folder.
 - **Offline tapes need Chrome or Edge on a computer.** Other browsers don't have the folder picker, so **+ Offline folder** isn't shown there. Which formats play depends on the browser: a file whose codec it can't decode (some MOV and M4A files, for example) is skipped.
 
 ## Credits
 
 The screenshots show footage from *Big Buck Bunny* (Blender Foundation) and *Wing It!* ([Blender Studio](https://studio.blender.org)), both released under Creative Commons Attribution (CC BY) licenses. Videos play through YouTube's embedded player.
+
+Saving audio follows the approach of [PackJC/YoutubeToMP3](https://github.com/PackJC/YoutubeToMP3) (GPL-3.0); none of its code is included. It uses [yt-dlp](https://github.com/yt-dlp/yt-dlp) and [FFmpeg](https://ffmpeg.org), which you install separately.

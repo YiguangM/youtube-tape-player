@@ -177,6 +177,92 @@ body.floating-body {
     outline-offset: 2px;
   }
 
+  /* Saving audio: a small display in the plate while it works. */
+  .save-progress {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    height: 28px;
+    padding: 0 4px 0 10px;
+    border-radius: 6px;
+    background: #0b0d0b;
+    box-shadow: inset 0 1px 4px rgba(0, 0, 0, 0.9);
+    color: #ffb54a;
+    font-family: var(--font-vt323), ui-monospace, monospace;
+    font-size: 17px;
+    letter-spacing: 0.06em;
+    white-space: nowrap;
+    text-shadow: 0 0 6px rgba(255, 170, 60, 0.55);
+  }
+
+  .save-meter {
+    width: 56px;
+    height: 6px;
+    border-radius: 3px;
+    background: #2e200f;
+    overflow: hidden;
+  }
+
+  .save-meter > span {
+    display: block;
+    height: 100%;
+    background: #ffb54a;
+    transition: width 0.3s;
+  }
+
+  .save-stop {
+    display: grid;
+    place-items: center;
+    width: 22px;
+    height: 22px;
+    border-radius: 4px;
+    color: #e09c40;
+    font-family: var(--font-geist-sans), sans-serif;
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+  }
+
+  .save-stop:hover {
+    background: #2e200f;
+  }
+
+  .save-stop:focus-visible {
+    outline: 2px solid #ffb54a;
+    outline-offset: 1px;
+  }
+
+  .save-option {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 10px 12px;
+    border: 1px solid var(--card-border);
+    border-radius: 10px;
+    background: var(--background);
+    cursor: pointer;
+  }
+
+  .save-option:has(input:checked) {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent);
+  }
+
+  .save-option > input {
+    margin-top: 3px;
+    accent-color: var(--accent);
+  }
+
+  .save-command {
+    padding: 6px 10px;
+    border: 1px solid var(--card-border);
+    border-radius: 8px;
+    background: var(--background);
+    font-family: ui-monospace, monospace;
+    font-size: 14px;
+    user-select: all;
+  }
+
   .deck-caption {
     font-size: 10px;
     letter-spacing: 0.22em;
